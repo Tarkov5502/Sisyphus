@@ -1,4 +1,4 @@
-# Sisyphus — the scheduler core (V3)
+# Sisyphus — the scheduler core (V4)
 
 *An inference operating system for underutilized consumer hardware. This package is the
 part that is pure algorithm and needs no 861 GB model present to build, test, or measure:
@@ -34,6 +34,40 @@ The honest headline moved. **The 128 GB purchase does not unlock the policy** �
 60 GB trunk resident, a 128 GB box has ~46 GB for experts and the 78 GB hot set does not
 fit; the tier that does is 192 GB. What unlocks the target is #1, which makes the result
 compute-bound and largely indifferent to the skew you cannot verify.
+
+## What V4 changed: compute is a model, not a constant
+
+V3 carried a single `COMPUTE_S_PER_TOKEN = 0.12`. Working the FLOP side properly showed why
+that cannot be right on a CPU: K3 does ~208 GFLOP per token regardless of scheduling, and
+at batch 32 a 16-core desktop's ~1 TFLOPS effective needs 6.7 s per step against 3.1 s of
+DRAM traversal. **Past batch ~15 the CPU is FLOP-bound, batching stops helping, and the
+per-token cost is a floor near 0.2 s** — worse than V3 assumed, and it makes prefill
+(16K tokens per convoy) a 27-minute cost the SSD work cannot touch.
+
+`geometry.ComputeModel` now places the trunk and the experts on CPU or GPU and computes
+each step as the slowest of SSD, memory/PCIe traversal and FLOPs. The GPU's role is not a
+storage tier (the trunk barely fits a consumer card) but a **streaming compute engine**:
+experts cross PCIe from RAM each step, are applied to every token in the batch in VRAM,
+and leave. PCIe x16 (~50 GB/s achieved) is close to desktop DRAM bandwidth, and GPU FLOPs
+are 50-100x the CPU's, so the wall moves to PCIe/SSD and per-token cost falls with batch
+again. Prefill drops from ~27 minutes to ~1 minute per convoy.
+
+| 192 GB, skip policy, expected bracket | tok/s | prefill/convoy | tokens/night |
+|---|---|---|---|
+| cpu, batch 32 (V3 said 218K)         | 5.1  | 27 min | 110K |
+| cpu with 2x better kernels           | 7.2  | 13 min | 183K |
+| GPU holds trunk only                 | 8.1  | 11 min | 211K |
+| GPU streams experts, x16, batch 32   | 8.1  | 1.2 min | 326K |
+| GPU streams experts, x16, batch 128  | 9.3  | 2.2 min | 386K |
+| + 4 drives (20 GB/s random)          | 18.5 | 2.2 min | **746K** |
+| same machine, tape (lossless, no routing assumption) | 13.6 | 6 min | **558K** |
+| same machine, decay (lossless)       | 8.1  | 2.3 min | 338K |
+
+The GPU also rescues the 128 GB tier: with the trunk in VRAM the RAM budget recovers 60 GB
+(cache 74-106 GB), and `128 GB + GPU x16` reaches 292-322K/night — three times what
+192 GB of RAM alone does on the CPU path. **The purchase order inverted: GPU, then
+drives, then RAM.** GPU speed barely matters (40 vs 100 TFLOPS changes nothing; SSD and
+PCIe bind), so a used 24 GB Gen4 card is most of the win at a quarter of the price.
 
 ## What this core does
 
@@ -71,39 +105,39 @@ warm-road throughput, now also the place the decay fix is visible.
 ## The results that matter
 
 From `RESULTS.md` (generated; expected bracket; 512-prompt + 256-decode jobs; cache
-derived from RAM):
+derived from RAM; compute per `ComputeModel`):
 
-| machine | policy | cache | MB/tok | hit | skip | tok/night |
+| machine | policy | cache | MB/tok | bound | tok/s | tok/night |
 |---|---|---|---|---|---|---|
-| 128 GB, striped | union + LRU | 46 | 5,598 | 0.00 | – | 71K |
-| 128 GB, striped | sisyphus (V2) | 46 | 4,686 | 0.16 | – | 83K |
-| 128 GB, striped | **skip** | 46 | 3,003 | 0.19 | 0.07 | **122K** |
-| 192 GB, striped | union + LRU | 110 | 5,598 | 0.00 | – | 71K |
-| 192 GB, striped | sisyphus (V2) | 110 | 3,248 | 0.42 | – | 115K |
-| 192 GB, striped | decay | 110 | 3,284 | 0.41 | – | 113K |
-| 192 GB, striped | **skip** | 110 | 1,419 | 0.62 | 0.07 | **218K** |
-| 192 GB, tape b235 | full sweep | – | 3,403 | – | – | 128K |
-| 256 GB, striped b64 | **skip** | 158 | 1,150 | 0.54 | 0.06 | **240K (compute-bound)** |
+| 128 GB, 2 drives, cpu, b32 | union + LRU | 46 | 5,598 | ssd | 1.8 | 57K |
+| 128 GB, 2 drives, cpu, b32 | skip | 46 | 3,003 | ssd | 3.4 | 88K |
+| 128 GB, 2 drives, GPU x16, b96 | decay | 74 | 2,923 | ssd | 3.5 | 149K |
+| 128 GB, 2 drives, GPU x16, b96 | **skip** | 74 | 1,335 | ssd | 7.7 | **322K** |
+| 192 GB, 2 drives, cpu, b32 | sisyphus (V2) | 110 | 3,248 | ssd | 3.2 | 82K |
+| 192 GB, 2 drives, cpu, b32 | skip | 110 | 1,419 | **cpu** | 5.1 | 110K |
+| 192 GB, 2 drives, GPU x16, b128 | decay | 122 | 2,536 | ssd | 4.0 | 172K |
+| 192 GB, 2 drives, GPU x16, b128 | **skip** | 122 | 1,105 | ssd | 9.3 | **386K** |
+| 192 GB, GPU x16 + 4 drives, b128 | decay | 122 | 2,536 | ssd | 8.1 | 338K |
+| 192 GB, GPU x16 + 4 drives, b128 | **skip** | 122 | 1,105 | ssd | 18.5 | **746K** |
+| 192 GB, GPU x16 + 4 drives, tape b355 | full sweep | – | 2,252 | ssd | 13.6 | **558K** |
 
-Three things to read off it. Demand-eviction's win needs the hot set to fit: 192 GB, not
-128. Skipping roughly halves bytes at any tier and reaches the compute ceiling
-(0.12 s/token → 8.33 tok/s) at 256 GB. And the tape floor sits at or above the V2
-policy at every tier, with no assumption at all — any scheduler that cannot beat it
-should degrade into it.
+Read off it: on the CPU path the `bound` column says `cpu` — more RAM cannot help. On the
+GPU path every row is SSD-bound — drives are the next lever, and the tape row shows what
+they buy with no routing assumption at all.
 
-**Sensitivity** (all in `RESULTS.md`): the skip policy holds 126K–240K/night across the
-weak→strong `hot_mass` bracket where decay alone spans 80K–162K. `hot_frac` above 0.15
-(hot set > 117 GB) erodes both. `coherent=False` collapses everything to ~50K — the
-convoy premise is the assumption to measure first.
+**Sensitivity** (all in `RESULTS.md`): routing unknowns as before (`coherent=False`
+collapses everything; `cold_weight_ratio` >= 1.5 removes the skip win). Compute unknowns:
+CPU at 0.5 TFLOPS caps every policy at ~55K/night; GPU TFLOPS is irrelevant; PCIe 25 vs
+50 GB/s costs 8% on the skip row.
 
 ## Run it
 
 ```bash
-python -m pytest sisyphus/test_coordinator.py -q     # 28 invariant tests, ~6 s
+python -m pytest sisyphus/test_coordinator.py -q     # 33 invariant tests, ~6 s
 python -m sisyphus.engine_sim                         # scenario, sensitivity, batch tables
 python -m sisyphus.tape                               # the tape floor by RAM tier
 python -m sisyphus.schedule                           # mixed-domain night, four policies
-python -m sisyphus.results                            # regenerate RESULTS.md (~2.5 min)
+python -m sisyphus.results                            # regenerate RESULTS.md (~4 min)
 python -m sisyphus.profiling.analyze routes.jsonl.gz  # once you have a real log
 ```
 
@@ -113,8 +147,9 @@ python -m sisyphus.profiling.analyze routes.jsonl.gz  # once you have a real log
   budget accounting, the byte accounting, the tape arithmetic, the profiling pipeline
   (tested end to end on synthetic logs). This is code that ships into the engine.
 - **Modeled, bracketed, swept:** routing skew (`hot_frac`, `hot_mass`), domain coherence,
-  cold gate weight, decode compute (0.12 s/token), prefill compute (÷4), KV per token
-  (from the MLA latent dim), OS reserve. Each is named at its call site and swept in
+  cold gate weight, CPU effective TFLOPS (1.0), CPU prefill GEMM gain (2x), DRAM (80 GB/s),
+  GPU TFLOPS (100), PCIe (50 / 25 GB/s), KV per token (from the MLA latent dim — possibly
+  6x pessimistic, see ADVERSARIAL_REVIEW.md), OS reserve. Each is named at its call site and swept in
   `RESULTS.md`; the profiling harness replaces the routing ones with data.
 - **Not modeled, and known:** the *quality* cost of skipped gate mass. The simulator
   prices it in gate units; only an eval on the real model (same prompts, those experts
@@ -129,11 +164,11 @@ python -m sisyphus.profiling.analyze routes.jsonl.gz  # once you have a real log
 ## Files
 
 ```
-geometry.py            K3 constants, RAM budget (RAM - trunk - OS - KV), KV, prefill, stable seeding
+geometry.py            K3 constants, RAM budget, KV, ComputeModel (CPU / GPU-trunk / GPU-stream), stable seeding
 routing.py             bracketed routing model with gate weights; BRACKETS; analytic helpers
 coordinator.py         ResidencyCache (decay), DemandHistogram, ExpertMajorScheduler (skip), Coordinator
 tape.py                full-sweep floor, KV-bounded batch, pin-vs-KV search
-engine_sim.py          Machine tiers, policies, prefill/KV-aware throughput, all tables
+engine_sim.py          Machine tiers x compute models, policies, SSD/traversal/FLOP throughput, all tables
 convoy_composer.py     route-aware batching + route-chaining (V2.11/V2.16, unchanged)
 schedule.py            the night pipeline: jobs -> convoys -> throughput, four policies
 results.py             regenerates RESULTS.md
@@ -144,12 +179,17 @@ profiling/
   replay.py            LoggedRouting + measure_logged: the real scheduler on real routes
   synthetic.py         a log from RoutingModel, so the loop is proven before paying
   RENT_TO_PROFILE.md   the runbook
-test_coordinator.py    28 invariant tests
+test_coordinator.py    33 invariant tests
+ADVERSARIAL_REVIEW.md  what holds, what is conditional, what was wrong; roadmap and budget
 RESULTS.md             generated measurements
 ```
 
 ## Next
 
+0. **Measure the compute constants on the machine you have** (`ADVERSARIAL_REVIEW.md`
+   Phase 0): llama.cpp on a RAM-resident MoE at `--parallel 32`, decode and prefill s/token,
+   then again with attention offloaded to whatever GPU is in the box. Replace
+   `CPU_TFLOPS_EFF`, `CPU_GEMM_GAIN`, and confirm the GPU-streaming path's PCIe rate.
 1. **Profile.** Follow `profiling/RENT_TO_PROFILE.md`. Three numbers decide the project:
    `hot_frac_at_mass["0.75"]` (does the hot set fit the RAM tier?), same- vs cross-domain
    coherence (is the convoy premise true?), `skippable_mass_at_gate` (how much can skip

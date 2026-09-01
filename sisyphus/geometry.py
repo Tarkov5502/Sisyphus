@@ -13,6 +13,7 @@ call site rather than buried in a default argument.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from typing import Any
 
 # --- Kimi-K3 geometry (parsed from shard-1 GGUF metadata) ---
@@ -47,13 +48,24 @@ DRIVE_LAYOUT_GBPS = 3.2      # co-activation sequential layout on one drive (V2.
 DRIVE_STRIPED_GBPS = 10.0    # both drives striped, Gen4-weighted, 9.7 MB reads (V2.5)
 DRIVE_SEQUENTIAL_GBPS = 12.0 # both drives striped, pure sequential (the tape regime)
 
-# --- Compute envelope ---
-# Effective per-token core-seconds for a decode step once cores are pinned. BRACKETED:
-# this is a class estimate for ~104B active params at Q2 on a desktop CPU, not measured.
+# --- Compute envelope (V4: a model, not a constant) ---
+# Work per token is fixed by the architecture: ~104B active params x 2 FLOP/param.
+# BRACKETED split between routed experts and the trunk (attention, shared experts, dense
+# block, embeddings), from the parameter count per expert (~31M at 9.7 MB / ~2.5 bpw).
+GFLOP_PER_TOKEN = 208.0
+GFLOP_PER_TOKEN_EXPERTS = 92.0      # 16 routed experts x 92 layers x ~31M params x 2
+GFLOP_PER_TOKEN_TRUNK = 116.0       # everything else that runs for every token
+# What the machine can do with it. All BRACKETED until Phase 0 measures them.
+CPU_TFLOPS_EFF = 1.0                # 16-core desktop, quantised kernels, effective (peak is ~2.5)
+CPU_GEMM_GAIN = 2.0                 # prefill (many tokens per weight) vs decode efficiency on CPU
+DRAM_GBPS = 80.0                    # dual-channel DDR5, achieved
+GPU_TFLOPS_EFF = 100.0              # RTX 5090-class, dense fp16/int8, effective
+GPU_VRAM_GB = 32.0
+PCIE_X16_GBPS = 50.0                # Gen5 x16, achieved (63 theoretical)
+PCIE_X8_GBPS = 25.0                 # Gen5 x8 — what is left when NVMe drives share the lanes
+# Legacy scalar kept for reference: what V3 assumed. Equivalent to ~1.7 TFLOPS effective at
+# batch 32 with the trunk on the CPU. Phase 0 replaces it with a measurement.
 COMPUTE_S_PER_TOKEN = 0.12
-# Prefill runs GEMM (many tokens per expert) instead of GEMV, so per-token cost is lower.
-# BRACKETED: 4x is a conservative GEMM-vs-GEMV efficiency ratio; profile it.
-PREFILL_COMPUTE_S_PER_TOKEN = COMPUTE_S_PER_TOKEN / 4.0
 
 # --- Workload shape (what a night's job looks like) ---
 DEFAULT_PROMPT_TOKENS = 512   # prompt length per job (prefill cost)
@@ -106,3 +118,77 @@ def stable_seed(*parts: Any) -> int:
     """
     h = hashlib.blake2b(repr(parts).encode("utf-8"), digest_size=4)
     return int.from_bytes(h.digest(), "big")
+
+
+# --------------------------------------------------------------------------- #
+#  Compute model: where the FLOPs run and what the bytes traverse to get there
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class ComputeModel:
+    """How a step's work is split between CPU and GPU, and which bus it crosses.
+
+    Three placements matter:
+      * CPU only — experts and trunk in RAM, computed on the cores. Traversal is DRAM;
+        FLOPs are the CPU's. At batch >= ~15 the CPU is FLOP-bound, not DRAM-bound, so
+        batching stops helping (V4 finding).
+      * trunk on GPU — attention/shared/dense resident in VRAM; experts still on CPU.
+        Removes ~56% of CPU FLOPs and 60 GB of DRAM traversal per step.
+      * experts streamed through GPU — experts cross PCIe from RAM each step and are
+        applied to every token's hidden state in VRAM; nothing expert-shaped is
+        resident. PCIe becomes the wall; GPU FLOPs are negligible.
+    """
+    name: str
+    cpu_tflops: float = CPU_TFLOPS_EFF
+    dram_gbps: float = DRAM_GBPS
+    trunk_on_gpu: bool = False
+    experts_on_gpu: bool = False
+    pcie_gbps: float = 0.0
+    gpu_tflops: float = 0.0
+    cpu_gemm_gain: float = CPU_GEMM_GAIN
+
+    def _times(self, tokens: int, expert_gb: float, kv_gb: float, expert_frac: float,
+               gemm: bool) -> dict[str, float]:
+        """Per-resource seconds for `tokens` tokens of work touching `expert_gb` of
+        expert weights. `expert_frac` is the share of routed expert applications actually
+        computed (1 - skipped). `gemm` marks prefill (many tokens per weight)."""
+        t: dict[str, float] = {}
+        trunk_gb = 0.0 if self.trunk_on_gpu else TRUNK_GB
+        cpu_gain = self.cpu_gemm_gain if gemm else 1.0
+        cpu_expert_gb = 0.0 if self.experts_on_gpu else expert_gb
+        t["dram"] = (cpu_expert_gb + kv_gb + trunk_gb) / self.dram_gbps
+        cpu_gflop = tokens * ((0.0 if self.experts_on_gpu else GFLOP_PER_TOKEN_EXPERTS * expert_frac)
+                              + (0.0 if self.trunk_on_gpu else GFLOP_PER_TOKEN_TRUNK))
+        t["cpu"] = cpu_gflop / 1000.0 / (self.cpu_tflops * cpu_gain)
+        if self.trunk_on_gpu or self.experts_on_gpu:
+            gpu_gflop = tokens * ((GFLOP_PER_TOKEN_EXPERTS * expert_frac if self.experts_on_gpu else 0.0)
+                                  + (GFLOP_PER_TOKEN_TRUNK if self.trunk_on_gpu else 0.0))
+            t["gpu"] = gpu_gflop / 1000.0 / self.gpu_tflops
+            # experts cross PCIe when streamed; activations crossing for a split model are
+            # ~7 KB/token/layer and negligible next to 9.7 MB experts.
+            t["pcie"] = (expert_gb / self.pcie_gbps) if self.experts_on_gpu else 0.0
+        return t
+
+    def step_seconds(self, batch: int, expert_gb: float, kv_gb: float,
+                     expert_frac: float = 1.0) -> tuple[float, str]:
+        """One lockstep decode step, excluding SSD. Returns (seconds, binding resource)."""
+        t = self._times(batch, expert_gb, kv_gb, expert_frac, gemm=False)
+        k = max(t, key=t.get)
+        return t[k], k
+
+    def prefill_seconds(self, tokens: int, touched_expert_gb: float, kv_gb: float,
+                        expert_frac: float = 1.0) -> tuple[float, str]:
+        """One convoy's prefill, excluding SSD: every touched expert traverses once and is
+        applied to all `tokens` (GEMM)."""
+        t = self._times(tokens, touched_expert_gb, kv_gb, expert_frac, gemm=True)
+        k = max(t, key=t.get)
+        return t[k], k
+
+
+CPU_ONLY = ComputeModel("cpu")
+CPU_FAST_KERNELS = ComputeModel("cpu-2x", cpu_tflops=2.0)
+GPU_TRUNK = ComputeModel("gpu-trunk", trunk_on_gpu=True, gpu_tflops=GPU_TFLOPS_EFF,
+                         pcie_gbps=PCIE_X16_GBPS)
+GPU_STREAM_X16 = ComputeModel("gpu-x16", trunk_on_gpu=True, experts_on_gpu=True,
+                              gpu_tflops=GPU_TFLOPS_EFF, pcie_gbps=PCIE_X16_GBPS)
+GPU_STREAM_X8 = ComputeModel("gpu-x8", trunk_on_gpu=True, experts_on_gpu=True,
+                             gpu_tflops=GPU_TFLOPS_EFF, pcie_gbps=PCIE_X8_GBPS)

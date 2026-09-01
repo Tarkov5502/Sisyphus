@@ -1,4 +1,4 @@
-# Adversarial review of Sisyphus V3 — is any of this real?
+# Adversarial review of Sisyphus — is any of this real? (V3 review, V4 recalculation)
 
 *September 2026. Written to break the plan, not to defend it. Every attack below was either
 run against the simulator or checked against a primary source. Verdicts are: **REAL**
@@ -18,7 +18,7 @@ without the model or the hardware).*
 | Demand decay fixes the domain-shift squat | REAL | nothing; −11% bytes on mixed nights, neutral on single-domain |
 | Residency-aware skip halves bytes | **CONDITIONAL** | cold picks are *not* low-gate. At `cold_weight_ratio` ≥ 1.5 the win is gone entirely (§2.1) |
 | Skip costs only ~7% quality | **UNKNOWN** | error compounds over 92 layers; only an eval on the real model can price it |
-| Compute ceiling 8.3 tok/s (0.12 s/token) | **UNKNOWN, load-bearing** | if the real number is 0.36 s/token, every SSD optimisation past 80K/night is wasted (§2.3) |
+| Compute ceiling 8.3 tok/s (0.12 s/token) | **WRONG as a constant** — V4 replaced it with a FLOP/traversal model; on a CPU the floor is ~0.2 s/token and prefill is 27 min/convoy (§2.3, §10) | CPU effective TFLOPS is still unmeasured; Phase 0 |
 | Tape regime ≈ 100K/night at 192 GB | CONDITIONAL on the KV constant, which may be 6× too pessimistic (§2.6) |
 | 128 GB RAM unlocks the policy | **WRONG** (V2 claim) — trunk leaves ~46 GB; the tier is 192 GB | — |
 | Profiling costs ~$30 | **WRONG** (my claim) — a GPU path is $200–500; a CPU path is $50–150 (§4) | — |
@@ -346,3 +346,117 @@ arguing. The pattern is that the *mechanisms* have held and the *constants* have
 That is the right way round — constants are cheap to fix — but it means no number in
 `RESULTS.md` should be quoted without its gate from §6, and the two that gate everything
 (§2.1 cold-gate correlation, §2.3 compute) are measurable for under $150 combined.
+
+---
+
+## 10. V4 recalculation — the compute constant, and what replaces it
+
+### 10.1 What was wrong
+
+`COMPUTE_S_PER_TOKEN = 0.12` treated compute as a scalar. Working it properly: K3 does ~208
+GFLOP per token (104B active × 2), fixed by the architecture. At batch 32 that is 6.7 TFLOP
+per step. A 16-core desktop delivers ~1 TFLOPS effective on quantised kernels, so the FLOP
+time (6.7 s) exceeds the DRAM traversal (3.1 s). **On a CPU past batch ~15 the wall is
+FLOPs, not bytes; batching cannot move it; the floor is ~0.2 s/token.** Prefill is worse:
+16K tokens per convoy is 3.4 PFLOP, ~27 minutes at a 2× GEMM gain, ~57 without. V3's
+218K/night at 192 GB becomes **110K** once compute is modelled, and the `bound` column
+reads `cpu` — more RAM cannot help that row.
+
+### 10.2 What improves it
+
+`geometry.ComputeModel` places the trunk and experts on CPU or GPU and computes each step
+as max(SSD, memory/PCIe traversal, FLOPs). Measured on the same routes (192 GB, skip):
+
+```
+compute path                               tok/s   prefill/convoy   tokens/night   bound
+cpu, 1 TFLOPS eff, batch 32                 5.1      27 min          110K          cpu
+cpu, 2 TFLOPS eff (better kernels)          7.2      13 min          183K          ssd
+GPU holds trunk only (56% of FLOPs off CPU) 8.1      11 min          211K          ssd
+GPU streams experts over PCIe x16, b32      8.1      1.2 min         326K          ssd
+GPU streams experts over PCIe x16, b128     9.3      2.2 min         386K          ssd
+  + 4 drives (20 GB/s random reads)        18.5      2.2 min         746K          ssd
+  same machine, decay (lossless)            8.1      2.3 min         338K          ssd
+  same machine, tape (lossless, no routing) 13.6     6 min           558K          ssd
+```
+
+The GPU is not a storage tier — the trunk barely fits a consumer card and the experts
+never will. It is a **streaming compute engine**: experts cross PCIe from RAM every step
+(x16 Gen5 ≈ 50 GB/s achieved, close to desktop DRAM), are applied to every token in VRAM,
+and leave. GPU FLOPs are 50–100× the CPU's, so they stop mattering: the sensitivity table
+shows 40 vs 100 TFLOPS changes nothing and PCIe 25 vs 50 GB/s costs ~8%. **A used 24 GB
+Gen4 card captures most of the win.** Prefill, the hidden killer of the CPU path, becomes a
+one-minute cost. And with the trunk in VRAM the 128 GB tier recovers 60 GB of RAM budget:
+`128 GB + GPU` reaches 292–322K/night, three times what 192 GB of RAM alone achieves.
+
+The purchase order inverted. V3 said RAM (192 GB) unlocks the policy. V4 says: **GPU
+first, drives second, RAM a distant third.** The `bound` column explains why — on the GPU
+path every row is SSD-bound, so drives are the next lever and the tape row shows what they
+buy with no routing assumption at all.
+
+### 10.3 Two conditions on the GPU path
+
+- **The trunk must fit VRAM.** Attention weights (~37B params) at Q4 are ~18–20 GB; shared
+  experts ~3 GB; embeddings can stay on the CPU. That fits 24 GB *only if KV lives in
+  RAM or the KV constant is the family's 576-value latent (§2.6) rather than 3584*. Phase 0's
+  `gguf-dump` decides whether a 24 GB card is enough or a 32 GB card is needed.
+- **PCIe lanes are shared with the drives.** On AM5/Z890 the x16 slot is the CPU-attached
+  budget. GPU at x16 leaves the CPU M.2 slots (two Gen5) plus chipset M.2 (aggregate ~8
+  GB/s) — the `192GB · GPU x16 + 4 drives (M.2) 20` row. GPU at x8 frees lanes for a
+  4-drive carrier but halves PCIe: the `GPU x8` row, ~20% slower on skip. Either beats the
+  CPU path by 3–6×.
+
+### 10.4 Recalculated budget (September 2026 prices)
+
+| item | price now | source |
+|---|---|---|
+| RTX 5090 32 GB, Gen5 | ~$5,000 (2.5× launch) | Tom's Hardware / TechSpot, 1 Sep 2026 |
+| RTX 4090 24 GB, Gen4, used | ~$2,500 | bestvaluegpu, 1 Sep 2026 |
+| RTX 3090 24 GB, Gen4, used | ~$1,300 | bestvaluegpu, 1 Sep 2026 |
+| Gen5 NVMe 2 TB | ~$400 | Tom's Hardware, 24 Aug 2026 |
+| DDR5 48 GB module | ~$700 (192 GB ≈ $2,800) | Tom's Hardware, 27 Aug 2026 |
+| large-RAM CPU instance for profiling | ~$8–15/hr | typical |
+
+GPU speed is irrelevant on this path and Gen4 x16 (~25 GB/s) costs ~8%, so the **used
+RTX 3090 is the value pick** — provided the trunk fits 24 GB (§10.3). The 5090 buys Gen5
+PCIe and 32 GB for 4× the price; not first.
+
+| phase | what | cost | gate |
+|---|---|---|---|
+| **0** | `gguf-dump` shard 1 (kv_lora_rank, tensor sizes → fixes KV, trunk, expert constants). llama.cpp on a RAM-resident MoE, `--parallel 32`: decode + prefill s/token, then with attention offloaded to any GPU present. `fio` 9.7 MB QD32 on Linux. | **$0** | first |
+| **1** | Large-RAM CPU instance, real Q2 GGUF, llama.cpp route dump + Q2-vs-hosted eval + skip-cost eval + server compute constant. | **$50–150** | Phase 0 |
+| **2** | **GPU**: used RTX 3090 24 GB (or 4090 if the trunk needs headroom; 5090 only if Phase 0 shows PCIe-bound). Attention re-quantised to Q4 for VRAM. | **$1,300–2,500** | Phase 0 says trunk fits |
+| **3** | **Drives**: 2 more Gen5 2 TB on CPU M.2 (+ chipset if available). Linux mdraid, expert-major layout. | **$800–1,700** | none |
+| **4** | Engine: llama.cpp fork — attention on GPU (exists), expert streaming through GPU (new: `mul_mat_id` with host-pinned expert buffers over PCIe), hot-set `mlock`, residency-bitmap top-k masking, route logging. Evaluate ktransformers first (it already splits attention/GPU from experts/CPU). | **$0, 6–10 weeks** | Phase 1 |
+| **5** | RAM 192 GB. Only if the profile's hot set does not fit the recovered 128 GB budget and prices normalise. | ~$2,800 | profile |
+| — | electricity (~450 W with GPU) | ~$340/yr | — |
+| **total to production, GPU + drives, no RAM** | | **$2,150–4,350 + time** | |
+
+### 10.5 Recalculated economics
+
+Hosted-equivalent value per night (§3 prices, 512-in / 256-out jobs):
+
+| configuration | policy | tokens/night | hosted-equiv/night | /year |
+|---|---|---|---|---|
+| 192 GB, cpu (V3 plan) | skip (lossy) | 110K | $2.30 | $850 |
+| 128 GB + used GPU, 2 drives | decay (lossless) | 149K | $3.15 | $1,150 |
+| 128 GB + used GPU, 2 drives | skip | 322K | $6.80 | $2,480 |
+| 128 GB + GPU, 4 drives | tape (lossless, no assumption) | ~360K | $7.60 | $2,770 |
+| 192 GB + GPU, 4 drives | tape | 558K | $11.80 | $4,300 |
+| 192 GB + GPU, 4 drives | skip | 746K | $15.70 | $5,750 |
+
+Against electricity of ~$340/yr, the **$2,150 GPU + drives build on the existing 128 GB
+pays back in 6–12 months on lossless numbers alone**, in ~4 months if skip survives the
+profile. That is a different conclusion from V3's "marginal, 1–3 years", and the whole
+difference is putting FLOPs on a GPU instead of buying RAM. Every row above still carries
+the §6 gates: routing (§2.1), compute (Phase 0), Q2 quality (§2.8), and I/O overlap
+(15–25% haircut).
+
+### 10.6 What V4 did not fix
+
+The engine gap got larger, not smaller: streaming experts through a GPU is a real
+`mul_mat_id`-over-PCIe backend that no maintained engine ships (ktransformers is closest,
+with attention on GPU and experts on CPU; the streaming variant is new work). The GPU path
+also assumes KV fits beside the trunk in VRAM or streams cheaply — Phase 0 decides. And
+nothing in V4 touches the routing unknowns; the profile is still the gate on every
+`skip` row.
+

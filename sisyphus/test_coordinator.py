@@ -373,3 +373,48 @@ def test_decay_beats_cumulative_on_mixed_night():
     dec = run_night(jobs, policy="decay", machine=mach, convoy_size=8, tokens_per_job=6)
     assert dec.convoys == cum.convoys == 2
     assert dec.mb_per_token < cum.mb_per_token
+
+
+# --------------------------------------------------------------------------- #
+#  Compute model (V4): FLOPs vs traversal, CPU vs GPU streaming
+# --------------------------------------------------------------------------- #
+def test_cpu_is_flop_bound_at_batch_32_and_batching_stops_helping():
+    from sisyphus.geometry import CPU_ONLY
+    s1, b1 = CPU_ONLY.step_seconds(1, 1472 * EXPERT_MB / 1024, kv_gb(1, 768))
+    s32, b32 = CPU_ONLY.step_seconds(32, 200 * 92 * EXPERT_MB / 1024, kv_gb(32, 768))
+    s128, b128 = CPU_ONLY.step_seconds(128, 400 * 92 * EXPERT_MB / 1024, kv_gb(128, 768))
+    assert b1 == "dram" and b32 == "cpu" and b128 == "cpu"
+    assert s32 / 32 == pytest.approx(s128 / 128, rel=0.01)     # per-token cost flat once FLOP-bound
+
+
+def test_gpu_streaming_moves_the_wall_to_pcie_and_scales_with_batch():
+    from sisyphus.geometry import GPU_STREAM_X16
+    s32, b32 = GPU_STREAM_X16.step_seconds(32, 200 * 92 * EXPERT_MB / 1024, kv_gb(32, 768))
+    s128, b128 = GPU_STREAM_X16.step_seconds(128, 400 * 92 * EXPERT_MB / 1024, kv_gb(128, 768))
+    assert b32 == b128 == "pcie"
+    assert s128 / 128 < 0.6 * (s32 / 32)                        # sublinear expert growth pays
+
+
+def test_trunk_on_gpu_removes_most_cpu_flops():
+    from sisyphus.geometry import CPU_ONLY, GPU_TRUNK, GFLOP_PER_TOKEN_TRUNK, GFLOP_PER_TOKEN
+    cpu, _ = CPU_ONLY.step_seconds(32, 18.0, 16.0)
+    trunk, _ = GPU_TRUNK.step_seconds(32, 18.0, 16.0)
+    assert trunk / cpu == pytest.approx(1 - GFLOP_PER_TOKEN_TRUNK / GFLOP_PER_TOKEN, abs=0.05)
+
+
+def test_gpu_prefill_is_orders_of_magnitude_cheaper():
+    from sisyphus.geometry import CPU_ONLY, GPU_STREAM_X16
+    cpu, cb = CPU_ONLY.prefill_seconds(32 * 512, 700.0, kv_gb(32, 512))
+    gpu, gb = GPU_STREAM_X16.prefill_seconds(32 * 512, 700.0, kv_gb(32, 512))
+    assert cb == "cpu" and gb in ("pcie", "gpu")
+    assert cpu > 20 * gpu
+
+
+def test_measure_reports_binding_resource():
+    rm, calls, cube = _cube_and_calls(batch=16, tokens=4)
+    m_cpu = measure("skip", calls, cube, MACHINES["192"], 4, rm=rm)
+    m_gpu = measure("skip", calls, cube, MACHINES["192+GPU"], 4, rm=rm)
+    assert m_cpu.bound in ("ssd", "cpu", "dram")
+    assert m_gpu.bound in ("ssd", "pcie", "gpu")
+    assert m_gpu.prefill_s < m_cpu.prefill_s / 5
+    assert m_gpu.tokens_per_night > m_cpu.tokens_per_night

@@ -290,6 +290,8 @@ class LayerResult:
     skipped_applications: int = 0         # (call, expert) pairs whose output was dropped
     skipped_mass: float = 0.0             # gate mass dropped, summed over calls
     calls: int = 0
+    applied: int = 0                      # distinct experts applied (loads + hits) this layer
+    applications: int = 0                 # (call, expert) pairs routed this layer
 
 
 # --------------------------------------------------------------------------- #
@@ -393,6 +395,8 @@ class ExpertMajorScheduler:
             skipped_applications=skipped_apps,
             skipped_mass=skipped_mass,
             calls=len(calls),
+            applied=len(load_order),
+            applications=sum(len(c.experts_at(layer)) for c in calls),
         )
 
 
@@ -405,6 +409,9 @@ class RunResult:
     skipped_mass: float = 0.0
     skipped_applications: int = 0
     token_layers: int = 0                 # tokens x layers — the unit of skipped mass
+    applied_experts: int = 0              # distinct experts applied, summed over layer-steps
+    applications: int = 0                 # (call, expert) pairs routed, summed
+    steps: int = 0                        # lockstep decode steps
 
     @property
     def mb_per_token(self) -> float:
@@ -413,6 +420,17 @@ class RunResult:
     @property
     def hit_rate(self) -> float:
         return self.cache.hit_rate
+
+    @property
+    def expert_flop_fraction(self) -> float:
+        """Share of routed expert applications actually computed (1 under 'load')."""
+        return 1.0 - self.skipped_applications / self.applications if self.applications else 1.0
+
+    @property
+    def applied_experts_per_step(self) -> float:
+        """Distinct experts (hits + loads) the step's compute must traverse — the DRAM or
+        PCIe traffic per lockstep step, before SSD fetches are even considered."""
+        return self.applied_experts / self.steps if self.steps else 0.0
 
     @property
     def skipped_mass_fraction(self) -> float:
@@ -444,7 +462,7 @@ class Coordinator:
         """
         results: list[LayerResult] = []
         skipped_mass = 0.0
-        skipped_apps = 0
+        skipped_apps = applied = applications = 0
         total_bytes_before = self.cache.bytes_fetched
         for tok in range(tokens):
             if routing is not None:
@@ -454,6 +472,8 @@ class Coordinator:
                 r = self.scheduler.run_layer(L, calls)
                 skipped_mass += r.skipped_mass
                 skipped_apps += r.skipped_applications
+                applied += r.applied
+                applications += r.applications
                 if keep_layer_results:
                     results.append(r)
             self.cache.decay_step()
@@ -466,4 +486,7 @@ class Coordinator:
             skipped_mass=skipped_mass,
             skipped_applications=skipped_apps,
             token_layers=n_tokens * self.layers,
+            applied_experts=applied,
+            applications=applications,
+            steps=tokens,
         )

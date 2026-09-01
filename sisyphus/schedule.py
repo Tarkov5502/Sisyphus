@@ -69,10 +69,11 @@ def run_night(jobs: list[dict], *, policy: str = "skip", machine: Machine = MACH
         total_tokens += r.tokens
         skipped_mass += r.skipped_mass
         token_layers += r.token_layers
-        tps, _ = throughput(r.tokens, cache.bytes_fetched - before, len(calls),
-                            machine.drive_gbps, trunk_streams)
-        pre = prefill_seconds(rm, len(calls), prompt_tokens, cache_gb, machine.drive_gbps,
-                              trunk_streams)
+        tps, _ = throughput(r.tokens, cache.bytes_fetched - before, len(calls), machine,
+                            trunk_streams, r.applied_experts_per_step, r.expert_flop_fraction,
+                            prompt_tokens + decode_tokens)
+        pre, _ = prefill_seconds(rm, len(calls), prompt_tokens, cache_gb, machine,
+                                 trunk_streams, r.expert_flop_fraction)
         night_s += pre + (decode_tokens * len(calls) / tps if tps else float("inf"))
         order.append([j["id"] for j in convoy])
 
@@ -104,12 +105,14 @@ def sample_jobs(per_domain: int = 32) -> list[dict]:
 def night_comparison(machine_key: str = "192") -> str:
     mach = MACHINES[machine_key]
     jobs = sample_jobs()
-    out = [f"NIGHT PIPELINE on {mach.label} — {len(jobs)} mixed jobs -> convoys of 32, one shared cache",
-           f"  {'policy':10} {'convoys':>7} {'cache':>6} {'MB/tok':>7} {'hit':>5} {'skip':>5} {'tok/night':>12}"]
-    for pol in ("union_lru", "sisyphus", "decay", "skip"):
-        p = run_night(jobs, policy=pol, machine=mach)
-        out.append(f"  {pol:10} {p.convoys:7d} {p.cache_gb:6.0f} {p.mb_per_token:7.0f} "
-                   f"{p.hit_rate:5.2f} {p.skipped_mass:5.2f} {p.tokens_per_night:12,.0f}")
+    out = [f"NIGHT PIPELINE on {mach.label} (cpu and GPU x16) — {len(jobs)} mixed jobs -> convoys of 32, one shared cache",
+           f"  {'compute':8} {'policy':10} {'convoys':>7} {'cache':>6} {'MB/tok':>7} {'hit':>5} {'skip':>5} {'tok/night':>12}"]
+    for key in (machine_key, machine_key + "+GPU"):
+        mach = MACHINES[key]
+        for pol in ("union_lru", "sisyphus", "decay", "skip"):
+            p = run_night(jobs, policy=pol, machine=mach)
+            out.append(f"  {mach.compute.name:8} {pol:10} {p.convoys:7d} {p.cache_gb:6.0f} {p.mb_per_token:7.0f} "
+                       f"{p.hit_rate:5.2f} {p.skipped_mass:5.2f} {p.tokens_per_night:12,.0f}")
     out.append("  convoy order: " + " -> ".join(
         f"{ids[0].rstrip('0123456789')}x{len(ids)}" for ids in p.convoy_order))
     return "\n".join(out)
