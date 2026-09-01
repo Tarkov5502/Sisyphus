@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.jsonl
+*.jsonl.gz
+profile.json
