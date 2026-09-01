@@ -18,9 +18,9 @@ dated web source), or ASSUMED (not yet measured).*
 | expert latent dim | 3584 | `expert_latent_length`; V2/V3 misread this as an MLA latent |
 | MLA KV per token | 576 fp16 values per MLA block → **0.028 MB/token** | `kv_lora_rank 512 + rope 64` |
 | **KDA state per stream** | 69 × 96 heads × 128 × 128 × 2 B → **217 MB (bf16)** | constant in context; the binding memory bound |
-| expert size | **9.68 MB** (IQ2_XS gate/up, IQ2_XS or IQ3_XXS down) | from tensor offsets |
-| trunk | **62 GB** | KDA block 474 MB, MLA block 232 MB, shared experts 11 GB, latent proj 7 GB, embed 2.5 GB |
-| model total | **860 GB**, 19 shards | 16 present (739 GB) on D: (the SN570 1 TB, not the 990 PRO); shards 16/18/19 missing; 245 GB of stale partials deleted 2026-09-01, 238 GB free |
+| expert size | **9.69 MB** (IQ2_XS gate/up, IQ2_XS or IQ3_XXS down) | exact, from tensor offsets across all 19 shards |
+| trunk | **62.2 GB** | attention 38.6 (KDA block 474 MB, MLA block 232 MB), shared experts 12.9, latent proj 8.2, embed 2.5 |
+| model total | **861.3 GB**, 19 shards, 2,573 tensors | **complete 2026-09-01** on D: (the SN570 1 TB, not the 990 PRO); 245 GB of stale partials deleted first; ~120 GB free |
 | work per token | ~208 GFLOP (CALC: 104B active × 2) | ~92 experts, ~116 trunk (of which KDA attention is large) |
 
 ## 2. The rig (RIG)
@@ -141,9 +141,9 @@ Gen4 NVMe 1 TB ~$130, Gen5 2 TB ~$400 · RTX 3090 used ~$1,300, 4090 used ~$2,50
 
 ## 9. Order of operations
 
-0. ~~Delete stale partials~~ done (245 GB freed). Finish shards 16, 18, 19:
-   `tools\finish_download.ps1`. Then move/split the model onto the 990 PRO (C:) — today it
-   sits entirely on the Gen3 SN570. **$0.**
+0. ~~Delete stale partials, finish shards 16/18/19~~ **done 2026-09-01** — all 19 shards, 861.3 GB,
+   headers verified (`tools\finish_download.ps1`). Still to do: split the model across the 990 PRO
+   (C:) and the SN570 (D:) by bandwidth — today it sits entirely on the Gen3 drive. **$0.**
 1. Buy 2×16 GB DDR5 (~$350) → 64 GB. Buy one Gen4 1 TB NVMe (~$130) for M2_2; split the
    model across the three drives by bandwidth. **~$480.**
 2. Test 5.5 on Kimi Linear 48B locally (fp8 vs bf16 state agreement). **$0.**

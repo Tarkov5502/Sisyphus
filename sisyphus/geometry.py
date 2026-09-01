@@ -33,10 +33,10 @@ SHARED_EXPERTS = 2
 EXPERT_LATENT = 3584      # experts' low-rank dimension (was mislabelled LATENT / "MLA latent")
 LATENT = EXPERT_LATENT    # kept for backwards compatibility; NOT a KV quantity
 
-# --- Quant sizing — measured from tensor offsets across 16/19 shards (739.3 GB accounted) ---
-EXPERT_MB = 9.68          # per routed expert (IQ2_XS gate/up, IQ2_XS/IQ3_XXS down); was 9.7 (estimate)
-TRUNK_GB = 62.0           # attention 33.5 (KDA 474 MB/block, MLA 232 MB/block) + shared experts
-                          # 11.1 + routed latent projections 7.1 + embed/output 2.5, scaled to 93 blocks
+# --- Quant sizing — exact, from tensor offsets across all 19 shards (861.3 GB, 2,573 tensors) ---
+EXPERT_MB = 9.694         # per routed expert (IQ2_XS gate/up, IQ2_XS/IQ3_XXS down); 799.1 GB total
+TRUNK_GB = 62.2           # attention 38.6 (KDA 474 MB/block, MLA 232 MB/block) + shared experts 12.9
+                          # + routed latent projections 8.2 + embed/output 2.5
 MODEL_GB = TRUNK_GB + LAYERS * EXPERTS * EXPERT_MB / 1024.0   # ≈ 860 GB (download is 19 shards)
 
 # --- Per-stream memory: KV for MLA blocks, recurrent state for KDA blocks ---
