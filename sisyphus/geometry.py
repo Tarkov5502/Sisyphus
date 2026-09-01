@@ -51,11 +51,14 @@ KDA_HEAD_DIM = 128
 KDA_STATE_BYTES_PER_STREAM = KDA_BLOCKS * KDA_HEADS * KDA_HEAD_DIM * KDA_HEAD_DIM * 2
 KDA_STATE_MB_PER_STREAM = KDA_STATE_BYTES_PER_STREAM / 1e6                # ≈ 217 MB per stream
 # This fixed per-stream cost, not per-token KV, is what caps batch on a small-RAM machine.
+# Per-token update ingredients (k, v, beta, gate) for replayable speculative rollback:
+KDA_UPDATE_MB_PER_TOKEN = KDA_BLOCKS * KDA_HEADS * KDA_HEAD_DIM * 2 * 2 / 1e6   # ≈ 3.4 MB
 
 # --- RAM budget ---
 # What is actually left for expert residency once the machine is running. The trunk is
 # pinned in RAM unless a GPU with >= TRUNK_GB of VRAM holds it (not consumer hardware).
-OS_RESERVE_GB = 6.0       # kernel, page tables, the engine itself, headroom
+OS_RESERVE_GB = 6.0       # kernel, page tables, the engine itself, headroom (lean Linux: ~2)
+LEAN_OS_RESERVE_GB = 2.0
 RAM_TIERS_GB = (32.0, 128.0, 192.0, 256.0)   # consumer DDR5 boards: 4 slots x 8/32/48/64 GB
 
 # --- Drive bandwidth envelopes (operator hardware, measured class) ---
@@ -101,11 +104,20 @@ def hot_set_gb(hot_frac: float) -> float:
     return LAYERS * int(EXPERTS * hot_frac) * EXPERT_MB / MB_PER_GB
 
 
-def kv_gb(batch: int, context_tokens: int) -> float:
+def kv_gb(batch: int, context_tokens: int, state_bytes: int = 2, state_copies: float = 1.0,
+          draft_tokens: int = 0) -> float:
     """Per-stream memory for `batch` concurrent streams each holding `context_tokens`:
     the fixed KDA recurrent state plus MLA KV for the context. On K3 the fixed term
-    dominates for any realistic context (217 MB vs 0.028 MB/token)."""
-    return batch * (KDA_STATE_MB_PER_STREAM + context_tokens * KV_MB_PER_TOKEN) / MB_PER_GB
+    dominates for any realistic context (217 MB vs 0.028 MB/token).
+
+    `state_bytes`  — 2 for bf16 (default), 1 for fp8 storage (lever 5.5).
+    `state_copies` — 2.0 if speculative rollback keeps a full second copy; 1.0 with
+                     replayable rollback (lever 5.1), which instead stores `draft_tokens`
+                     worth of per-token update vectors.
+    """
+    state = KDA_STATE_MB_PER_STREAM * (state_bytes / 2.0) * state_copies
+    replay = draft_tokens * KDA_UPDATE_MB_PER_TOKEN
+    return batch * (state + replay + context_tokens * KV_MB_PER_TOKEN) / MB_PER_GB
 
 
 def cache_budget_gb(ram_gb: float, batch: int, context_tokens: int,

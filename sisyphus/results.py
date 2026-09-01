@@ -20,7 +20,7 @@ from .geometry import (
     TRUNK_GB, hot_set_gb,
 )
 from .schedule import night_comparison
-from .tape import tape_table
+from .tape import rig_levers_table, tape_table
 
 HEADER = """# Sisyphus scheduler — measured results (V4)
 
@@ -65,6 +65,7 @@ def main(out: Path) -> None:
                       pcie=PCIE_X16_GBPS, pt=DEFAULT_PROMPT_TOKENS, dt=DEFAULT_DECODE_TOKENS),
         "## Scenarios\n\n```\n" + scenario_table() + "\n```\n",
         "## Tape regime (the assumption-free floor)\n\n```\n" + tape_table() + "\n```\n",
+        "## The operator's rig — state-wall levers (FINDINGS.md §5)\n\n```\n" + rig_levers_table() + "\n```\n",
         "## Sensitivity — routing unknowns\n\n```\n" + sensitivity_table() + "\n```\n",
         "## Sensitivity — compute unknowns\n\n```\n" + compute_sensitivity_table() + "\n```\n",
         "## Batch curve (also the deferral curve)\n\n```\n" + batch_table() + "\n```\n",

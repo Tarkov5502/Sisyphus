@@ -20,7 +20,7 @@ dated web source), or ASSUMED (not yet measured).*
 | **KDA state per stream** | 69 × 96 heads × 128 × 128 × 2 B → **217 MB (bf16)** | constant in context; the binding memory bound |
 | expert size | **9.68 MB** (IQ2_XS gate/up, IQ2_XS or IQ3_XXS down) | from tensor offsets |
 | trunk | **62 GB** | KDA block 474 MB, MLA block 232 MB, shared experts 11 GB, latent proj 7 GB, embed 2.5 GB |
-| model total | **860 GB**, 19 shards | 16 present (739 GB), shards 16/18/19 missing, ~300 GB `.incomplete` junk |
+| model total | **860 GB**, 19 shards | 16 present (739 GB) on D: (the SN570 1 TB, not the 990 PRO); shards 16/18/19 missing; 245 GB of stale partials deleted 2026-09-01, 238 GB free |
 | work per token | ~208 GFLOP (CALC: 104B active × 2) | ~92 experts, ~116 trunk (of which KDA attention is large) |
 
 ## 2. The rig (RIG)
@@ -63,11 +63,11 @@ Within $500 the plain K3 ceiling is ~170K/night. 500K plain needs ~145 GB free f
 
 **5.1 Replayable speculative decoding.** In tape mode the sweep already touches every
 expert, so verifying k drafted tokens per stream per sweep multiplies tokens per sweep by
-~`1 + accept × (k−1)` at no SSD cost; GPU has the FLOPs (219 × 4 × 208 GFLOP ≈ 5 s per
+`1 + a + a² + … + a^(k−1)` (2.77 at a=0.7, k=4) at no SSD cost; GPU has the FLOPs (219 × 4 × 208 GFLOP ≈ 5 s per
 sweep). Rollback of the KDA state on rejection does NOT need a second state copy: the update
 is a gated rank-1 rule `S ← S·decay + β·k·vᵀ`, so store the canonical S plus the per-token
 (k, v, β, gate) for the k drafts (~3.4 MB/token/stream) and replay the accepted prefix after
-acceptance. Overhead ~6% memory. **64 GB + 1 drive, k=4, 70% accept → ~490K/night.**
+acceptance. Overhead ~6% memory. **64 GB + 1 drive, k=4, 70% accept → ~510K/night** (with 5.3).
 Assumed: 70% acceptance with a 1–3B draft model (measure).
 
 **5.2 Workload shape: input tokens are ~40× cheaper than output tokens.** One sweep
@@ -95,8 +95,21 @@ agreement >99% and perplexity <1% delta to pass.
 **5.6 Lower-precision tail experts.** Re-quantize cold experts IQ2_XS → IQ1_S/M: sweep
 bytes ~−30%. Quality cost unmeasured; needs the routing profile to choose hot vs cold.
 
-**Stack estimate, 64 GB + 1 drive:** 167K → 5.3: ~210K → 5.4: ~280K; or 5.3 + 5.1: ~450–490K;
-+ 5.5: ~800K. Plus 5.2 in parallel for extraction-shaped jobs.
+**Stack, modelled (`sisyphus.tape.rig_levers_table`, 64 GB + 1 drive, 256/256 jobs, 85%
+overlap; acceptance per sweep is geometric, 1 + a + a² + a³ = 2.77 at a=0.7, k=4):**
+
+| lever stack | streams | tok/s | out tokens/night |
+|---|---|---|---|
+| plain tape | 219 | 4.0 | 167K |
+| + 5.3 lean RAM + 6 GB VRAM for states | 294 | 5.3 | 222K |
+| + 5.4 sparse sweep (no speculation) | 294 | 6.9 | 284K |
+| 5.3 + 5.1 replayable speculation (k=4, 70%) | 278 | 12.7 | **510K** |
+| same with naive rollback (2 state copies) | 151 | 6.9 | 287K |
+| 5.3 + 5.1 + 5.5 fp8 state (ASSUMED) | 499 | 22.9 | 866K |
+
+At 32 GB (no RAM purchase) the same stack reaches 332K with speculation, 576K with fp8.
+Input tokens (5.2), same build, 2048/8 jobs: ~6.2 M/night (~$19/night hosted-equivalent).
+Regenerate with `python -m sisyphus.results`; the tables live in RESULTS.md.
 
 ## 6. Earlier findings that still stand (SIM)
 
@@ -128,8 +141,9 @@ Gen4 NVMe 1 TB ~$130, Gen5 2 TB ~$400 · RTX 3090 used ~$1,300, 4090 used ~$2,50
 
 ## 9. Order of operations
 
-0. Delete `D:\models\Kimi-K3-GGUF\.cache\huggingface\download` (~300 GB); finish shards
-   16, 18, 19. **$0.**
+0. ~~Delete stale partials~~ done (245 GB freed). Finish shards 16, 18, 19:
+   `tools\finish_download.ps1`. Then move/split the model onto the 990 PRO (C:) — today it
+   sits entirely on the Gen3 SN570. **$0.**
 1. Buy 2×16 GB DDR5 (~$350) → 64 GB. Buy one Gen4 1 TB NVMe (~$130) for M2_2; split the
    model across the three drives by bandwidth. **~$480.**
 2. Test 5.5 on Kimi Linear 48B locally (fp8 vs bf16 state agreement). **$0.**

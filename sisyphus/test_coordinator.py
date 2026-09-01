@@ -420,3 +420,41 @@ def test_measure_reports_binding_resource():
     assert m_gpu.bound in ("ssd", "pcie", "gpu")
     assert m_gpu.prefill_s < m_cpu.prefill_s / 5
     assert m_gpu.tokens_per_night > m_cpu.tokens_per_night
+
+
+
+# --------------------------------------------------------------------------- #
+#  Tape levers (FINDINGS.md §5)
+# --------------------------------------------------------------------------- #
+def test_tape_levers_monotone_and_bounded():
+    from sisyphus.tape import TapeOptions, best_tape, RIG_GPU
+    kw = dict(compute=RIG_GPU, seq_gbps=17.9, prompt_tokens=256, decode_tokens=256, overlap=0.85)
+    plain = best_tape(64, 512, **kw)
+    lean = best_tape(64, 512, opts=TapeOptions(lean_ram=True, vram_state_gb=6.0), **kw)
+    sparse = best_tape(64, 512, opts=TapeOptions(lean_ram=True, vram_state_gb=6.0, sparse=True), **kw)
+    spec = best_tape(64, 512, opts=TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4), **kw)
+    naive = best_tape(64, 512, opts=TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4, replay=False), **kw)
+    fp8 = best_tape(64, 512, opts=TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4, state_bytes=1), **kw)
+    assert plain.batch < lean.batch                              # reclaimed RAM -> more streams
+    assert sparse.step_s < lean.step_s and 0.6 < sparse.sweep_fraction < 0.95
+    assert spec.tokens_per_night > lean.tokens_per_night * 2     # ~2.8 tokens per sweep
+    assert naive.batch < 0.6 * spec.batch                        # second state copy halves batch
+    assert fp8.batch > 1.7 * spec.batch                          # fp8 state ~doubles streams
+    assert spec.batch >= 0.9 * lean.batch                        # replay overhead is small
+    assert all(p.bound in ("ssd", "pcie", "gpu") for p in (plain, lean, sparse, spec, fp8))
+
+
+def test_speculation_acceptance_is_geometric():
+    from sisyphus.tape import TapeOptions
+    o = TapeOptions(spec_k=4, accept=0.7)
+    assert o.tokens_per_stream_step == pytest.approx(1 + 0.7 + 0.49 + 0.343)
+    assert TapeOptions().tokens_per_stream_step == 1.0
+
+
+def test_input_tokens_scale_with_prompt_not_sweeps():
+    from sisyphus.tape import TapeOptions, best_tape, RIG_GPU
+    o = TapeOptions(lean_ram=True, vram_state_gb=6.0)
+    short = best_tape(64, 512, compute=RIG_GPU, seq_gbps=17.9, opts=o, prompt_tokens=256, decode_tokens=256, overlap=0.85)
+    long_ = best_tape(64, 2056, compute=RIG_GPU, seq_gbps=17.9, opts=o, prompt_tokens=2048, decode_tokens=8, overlap=0.85)
+    assert long_.input_tokens_per_night > 20 * short.input_tokens_per_night
+    assert long_.tokens_per_night < short.tokens_per_night
