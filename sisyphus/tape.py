@@ -12,10 +12,12 @@ That makes the tape regime two things at once:
   * the FLOOR every clever policy must beat, computed from physics alone; and
   * the regime the scheduler should degrade into as batch grows.
 
-In the tape regime the binding constraint is no longer expert residency but KV memory:
-the batch that fits is `(RAM - trunk - OS - layer buffer) / (context x KV per token)`.
-Expert residency and KV compete for the same RAM, and this module makes that trade
-explicit (the original simulator had no KV term at all).
+In the tape regime the binding constraint is no longer expert residency but per-stream
+memory: the batch that fits is `(RAM - trunk - OS - layer buffer) / per-stream bytes`. On
+K3 that per-stream cost is dominated by the KDA recurrent state (~217 MB, constant in
+context) rather than MLA KV (0.028 MB/token) — measured from the shards, see geometry.py.
+Expert residency and stream state compete for the same RAM; this module makes that trade
+explicit (the original simulator had no term for either).
 
 Prefill is one sweep per convoy regardless of prompt length: all prompt tokens of the
 whole batch are pushed through a layer while its experts stream past, so the prompt is
@@ -28,7 +30,7 @@ from dataclasses import dataclass
 from .geometry import (
     CPU_ONLY, GPU_STREAM_X16, ComputeModel, DEFAULT_DECODE_TOKENS, DEFAULT_PROMPT_TOKENS,
     DRIVE_SEQUENTIAL_GBPS, EXPERTS, EXPERT_MB, MB_PER_GB, MODEL_GB, OS_RESERVE_GB,
-    TRUNK_GB, KV_MB_PER_TOKEN, kv_gb, night_tokens,
+    TRUNK_GB, kv_gb, night_tokens,
 )
 
 # One layer's full expert set must be in flight while it streams: the ring buffer.
@@ -71,7 +73,7 @@ def max_batch(ram_gb: float, context_tokens: int, pinned_gb: float = 0.0,
     free = ram_gb - OS_RESERVE_GB - LAYER_BUFFER_GB - pinned_gb
     if not trunk_on_gpu:
         free -= TRUNK_GB
-    per_stream_gb = context_tokens * KV_MB_PER_TOKEN / MB_PER_GB
+    per_stream_gb = kv_gb(1, context_tokens)          # KDA state + MLA KV for the context
     return max(0, int(free / per_stream_gb)) if per_stream_gb > 0 else 0
 
 

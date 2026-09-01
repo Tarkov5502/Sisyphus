@@ -250,7 +250,7 @@ def test_policy_ladder_on_192gb():
 
 def test_ram_budget_is_derived_not_asserted():
     # a 128 GB box cannot give experts 100 GB once the 60 GB trunk and KV are resident
-    assert cache_budget_gb(128, 32, 768) < 50
+    assert cache_budget_gb(128, 32, 768) < 60
     assert cache_budget_gb(128, 32, 768, trunk_on_gpu=True) > 100
     assert cache_budget_gb(32, 8, 768) == 0.0            # cannot even hold the trunk
     cache, streams = MACHINES["32"].budget(8, 768)
@@ -303,7 +303,9 @@ def test_full_geometry_sanity():
 def test_tape_batch_is_bounded_by_kv():
     assert max_batch(128, 1024) < max_batch(192, 1024) < max_batch(256, 1024)
     assert max_batch(128, 1024) < max_batch(128, 512)
-    assert kv_gb(1, 1024) == pytest.approx(1024 * 3584 * 2 * 93 / 1e6 / 1024)
+    from sisyphus.geometry import KDA_STATE_MB_PER_STREAM, KV_MB_PER_TOKEN
+    assert kv_gb(1, 1024) == pytest.approx((KDA_STATE_MB_PER_STREAM + 1024 * KV_MB_PER_TOKEN) / 1024)
+    assert KDA_STATE_MB_PER_STREAM > 1024 * KV_MB_PER_TOKEN   # fixed state dominates KV at 1K ctx
     p = plan_tape(128, 10_000, 1024)
     assert not p.feasible and p.tokens_per_night == 0.0
     p = plan_tape(192, 64, 1024)

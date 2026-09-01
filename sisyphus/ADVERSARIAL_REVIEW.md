@@ -460,3 +460,91 @@ also assumes KV fits beside the trunk in VRAM or streams cheaply — Phase 0 dec
 nothing in V4 touches the routing unknowns; the profile is still the gate on every
 `skip` row.
 
+
+---
+
+## 11. Measured geometry (2026-09-01) and the $500 question on the actual rig
+
+### 11.1 What the shards say
+
+Read directly from `D:\models\Kimi-K3-GGUF\UD-Q2_K_XL` (16 of 19 shards present, 739 GB;
+shards 16, 18, 19 missing; ~300 GB of `.incomplete` partials in `.cache/huggingface/download`):
+
+| constant | V3 value | measured | consequence |
+|---|---|---|---|
+| architecture | (assumed DeepSeek-like) | `kimi-k3`, 93 blocks, **24 MLA + 69 KDA** | hybrid linear attention; memory model was wrong in kind, not degree |
+| KV per token | 0.667 MB (from `LATENT=3584`) | **0.028 MB** (576 fp16 x 24 MLA blocks) | `3584` is `expert_latent_length`, not a KV quantity |
+| per-stream fixed state | none modelled | **217 MB** (69 KDA blocks x 96 heads x 128x128 bf16) | caps batch regardless of context; the real bound |
+| expert size | 9.7 MB (estimate) | **9.68 MB** (IQ2_XS/IQ3_XXS, from tensor offsets) | confirmed |
+| trunk | 60 GB (estimate) | **62 GB** (KDA block 474 MB, MLA block 232 MB, shared 11 GB, latent proj 7 GB) | confirmed |
+| model | 841/861/918 GB (three numbers) | **860 GB**, 19 shards | one number now |
+| shards on disk | assumed complete | **16/19** | download must be finished before any run |
+
+### 11.2 The rig
+
+i7-12700KF (no AVX-512), MSI PRO Z690-A (4 DIMM, 2 free; 4 M.2, 2 free at Gen4), 2x16 GB
+DDR5-4800, RTX 3070 Ti 8 GB on Gen4 x16 (~22 GB/s, ~40 TFLOPS effective), Samsung 990 PRO 4 TB
+(Gen4, ~7.4 GB/s) + WD SN570 1 TB (Gen3, ~3.5 GB/s). Aggregate sequential ~11 GB/s as-is,
+~18 GB/s with one more Gen4 drive on a chipset slot.
+
+The GPU changes the compute picture for free: the whole model streams SSD -> RAM -> PCIe ->
+VRAM each step in tape mode, and 8 GB of VRAM is enough for the ring buffer and hidden states.
+FLOPs and prefill stop being the wall. What is left is SSD bandwidth (fixable for $130) and
+per-stream state memory (fixable only with RAM).
+
+### 11.3 K3 on this rig, tape regime, GPU streaming, measured geometry, 85% overlap
+
+```
+config                                             streams  s/step   tok/s   tokens/night
+32 GB as-is                                            77     91      0.84       36K
+32 GB + 1 Gen4 drive ($130)                            77     55      1.38       60K
+64 GB (+2x16 DDR5 ~$350) as-is                        219     91      2.38      103K
+64 GB + 1 drive  (~$480 total)                        219     55      3.87      167K
+128 GB (+2x48 ~$1,400) + 1 drive                      502     55      8.60      372K
+```
+
+The KDA state is the wall. At 217 MB per stream, 49.5 GB of free RAM holds 219 streams, so
+the sweep produces 219 tokens per 55 s no matter how fast the drives get. **500K/night needs
+~145 GB free for state, i.e. the 160-192 GB RAM tier (~$2,800 today).** Within $500 the K3
+ceiling on this rig is ~170K/night.
+
+### 11.4 The one lever that changes this: speculative decoding *inside the sweep*
+
+In the scheduler regime speculative decoding was worthless (each drafted token widens the
+expert union, §7 of the deep dive). In the tape regime the sweep already touches every
+expert, so its cost is fixed per step and **verifying k drafted tokens per stream per sweep
+multiplies tokens per sweep by ~1 + accept x (k-1)** at no extra SSD cost. GPU FLOPs for the
+verification are ample (219 x 4 x 208 GFLOP = 5 s of a 55 s step). The catch is the KDA
+state: rejected drafts must roll back the recurrent state, which naively needs a second copy
+per stream and halves the batch.
+
+```
+64 GB + 1 drive, k=4, 70% accept, 2 state copies (rollback)    113 streams   6.1 tok/s   263K
+64 GB + 1 drive, k=4, 70% accept, in-place state (research)    219 streams  11.4 tok/s   493K
+128 GB + 1 drive, k=4, 70% accept, 2 state copies              259 streams  13.3 tok/s   576K
+```
+
+"In-place state" means recovering the accepted-prefix state without a second copy — e.g.
+recomputing the KDA update for the accepted tokens with the (resident, 33 GB) attention
+weights after acceptance is known, or a checkpoint scheme cheaper than a full copy. It is a
+research item, not a product, and it is the only path that puts 500K inside $500 on this
+rig. The draft model (a 1-3B model on the GPU, ~negligible) and the verification kernel are
+new engine work on top of the tape backend that also does not exist yet.
+
+### 11.5 Housekeeping before any of this
+
+1. Finish the download: shards 16, 18, 19 (~150 GB). Delete `.cache/huggingface/download/`
+   under the model folder (~300 GB of dead partials) first; the drive is at ~1.04 TB used.
+2. The scheduler regime is irrelevant on this rig at this RAM: there is no expert cache
+   worth speaking of. Everything K3 here is tape.
+3. Native Linux for the run; Windows will not sustain three-drive sequential streaming.
+
+### 11.6 Revised bottom line
+
+- $500 on this rig: **~170K/night of K3, lossless, tape regime** (64 GB + 1 drive),
+  ~260K with speculative decoding and state duplication, ~490K only if the in-place state
+  rollback works. "500K reliably after adversarial runs" is not available for K3 at $500.
+- The same $480 pointed at a MoE whose trunk + hot set fit in 64 GB (100-250B total,
+  10-25B active) clears 500K with margin on the CPU alone and needs no engine invention.
+- The next RAM tier that makes K3 at 500K comfortable is 160-192 GB, ~$2,800 at
+  September-2026 DDR5 prices; at that tier plain tape does ~600K and speculation ~1M+.

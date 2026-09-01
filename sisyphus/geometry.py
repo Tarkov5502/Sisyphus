@@ -16,25 +16,41 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any
 
-# --- Kimi-K3 geometry (parsed from shard-1 GGUF metadata) ---
-LAYERS = 92               # 93 blocks total; one leading dense block is the trunk, 92 MoE layers
-BLOCKS = 93               # attention blocks that hold KV (the dense trunk block has KV too)
-EXPERTS = 896             # routed experts per MoE layer
-TOPK = 16                 # routed experts activated per token per layer
-SHARED_EXPERTS = 2        # always-on experts (part of the resident trunk)
-LATENT = 3584             # MLA latent dim — why KV compresses so hard
+# --- Kimi-K3 geometry — MEASURED from the shards on D:\models (2026-09-01) ---
+# Header: general.architecture = kimi-k3, 93 blocks, 1 leading dense, expert_count 896,
+# expert_used_count 16, expert_shared_count 2, kv_lora_rank 512, rope dim 64 (key_length 576),
+# expert_latent_length 3584 (the number V2/V3 misread as an MLA latent — it is the EXPERTS'
+# low-rank dimension). head_count_kv is the array [0,0,0,1,...]: only every 4th block is MLA
+# attention; the other three are KDA (Kimi Delta Attention), linear attention with a fixed-
+# size recurrent state per stream. K3 is a hybrid, and that changes the memory model.
+LAYERS = 92               # MoE layers (93 blocks - 1 leading dense)
+BLOCKS = 93
+MLA_BLOCKS = 24           # blocks with a KV cache (head_count_kv > 0)
+KDA_BLOCKS = 69           # blocks with recurrent state instead of KV
+EXPERTS = 896
+TOPK = 16
+SHARED_EXPERTS = 2
+EXPERT_LATENT = 3584      # experts' low-rank dimension (was mislabelled LATENT / "MLA latent")
+LATENT = EXPERT_LATENT    # kept for backwards compatibility; NOT a KV quantity
 
-# --- Quant sizing (derived from the real 861 GB UD-Q2_K_XL file) ---
-# (861 GB file - ~60 GB always-resident trunk) / (92 layers * 896 experts) ≈ 9.7 MB/expert.
-EXPERT_MB = 9.7
-TRUNK_GB = 60.0           # attention + router + 2 shared experts + dense block
-MODEL_GB = TRUNK_GB + LAYERS * EXPERTS * EXPERT_MB / 1024.0   # ≈ 841 GB of expert+trunk bytes
+# --- Quant sizing — measured from tensor offsets across 16/19 shards (739.3 GB accounted) ---
+EXPERT_MB = 9.68          # per routed expert (IQ2_XS gate/up, IQ2_XS/IQ3_XXS down); was 9.7 (estimate)
+TRUNK_GB = 62.0           # attention 33.5 (KDA 474 MB/block, MLA 232 MB/block) + shared experts
+                          # 11.1 + routed latent projections 7.1 + embed/output 2.5, scaled to 93 blocks
+MODEL_GB = TRUNK_GB + LAYERS * EXPERTS * EXPERT_MB / 1024.0   # ≈ 860 GB (download is 19 shards)
 
-# --- KV cache (MLA latent, fp16) ---
-# Per token per block the cache holds the compressed latent (LATENT fp16 values). This is
-# an estimate off the latent dim; the profiling harness measures it exactly.
-KV_BYTES_PER_TOKEN_BLOCK = LATENT * 2
-KV_MB_PER_TOKEN = KV_BYTES_PER_TOKEN_BLOCK * BLOCKS / 1e6      # ≈ 0.67 MB per context token
+# --- Per-stream memory: KV for MLA blocks, recurrent state for KDA blocks ---
+# MLA: 576 fp16 values per token per MLA block — 4x smaller than the DeepSeek-style
+# estimate because only 24 of 93 blocks cache KV.
+KV_BYTES_PER_TOKEN_BLOCK = 576 * 2
+KV_MB_PER_TOKEN = KV_BYTES_PER_TOKEN_BLOCK * MLA_BLOCKS / 1e6            # ≈ 0.028 MB/token
+# KDA: state S in R^{head_dim x head_dim} per head, 96 heads (12288 / 128), per stream,
+# CONSTANT in context length. Held in bf16 between steps (fp32 doubles it).
+KDA_HEADS = 96
+KDA_HEAD_DIM = 128
+KDA_STATE_BYTES_PER_STREAM = KDA_BLOCKS * KDA_HEADS * KDA_HEAD_DIM * KDA_HEAD_DIM * 2
+KDA_STATE_MB_PER_STREAM = KDA_STATE_BYTES_PER_STREAM / 1e6                # ≈ 217 MB per stream
+# This fixed per-stream cost, not per-token KV, is what caps batch on a small-RAM machine.
 
 # --- RAM budget ---
 # What is actually left for expert residency once the machine is running. The trunk is
@@ -86,8 +102,10 @@ def hot_set_gb(hot_frac: float) -> float:
 
 
 def kv_gb(batch: int, context_tokens: int) -> float:
-    """KV residency for `batch` concurrent streams each holding `context_tokens`."""
-    return batch * context_tokens * KV_MB_PER_TOKEN / MB_PER_GB
+    """Per-stream memory for `batch` concurrent streams each holding `context_tokens`:
+    the fixed KDA recurrent state plus MLA KV for the context. On K3 the fixed term
+    dominates for any realistic context (217 MB vs 0.028 MB/token)."""
+    return batch * (KDA_STATE_MB_PER_STREAM + context_tokens * KV_MB_PER_TOKEN) / MB_PER_GB
 
 
 def cache_budget_gb(ram_gb: float, batch: int, context_tokens: int,

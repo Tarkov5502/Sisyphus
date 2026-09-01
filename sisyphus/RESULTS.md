@@ -10,10 +10,10 @@ is hand-edited.
 | quantity | value | status |
 |---|---|---|
 | model on disk (trunk + experts, Q2) | 841 GB | measured off the download |
-| trunk pinned in RAM | 60 GB | measured |
-| expert | 9.7 MB | measured |
-| hot set at hot_frac 0.10 / 0.15 | 78 / 117 GB | depends on the bracketed skew |
-| KV per context token (MLA latent, fp16) | 0.67 MB | estimate from latent dim |
+| trunk pinned in RAM | 62 GB | measured |
+| expert | 9.68 MB | measured |
+| hot set at hot_frac 0.10 / 0.15 | 77 / 117 GB | depends on the bracketed skew |
+| KV per context token (MLA latent, fp16) | 0.03 MB | estimate from latent dim |
 | OS reserve | 6 GB | assumption |
 | work per token | 208 GFLOP (92 experts / 116 trunk) | from parameter count |
 | CPU effective / DRAM | 1.0 TFLOPS / 80 GB/s | BRACKETED — Phase 0 measures |
@@ -36,72 +36,72 @@ over PCIe each step, trunk in VRAM. The `bound` column names what is binding.
 SCENARIOS — expected bracket, job = 512 prompt + 256 decode tokens, spec x1.0. cache = RAM - trunk - OS - KV (derived; * = trunk streams too)
 machine                                  policy        cache   MB/tok bound   hit  skip  tok/s  pre m    tok/night
 ------------------------------------------------------------------------------------------------------------------
-32GB · Gen3 1.5 · cpu · b1               naive_single    17*  12944.7   ssd  0.09  0.00   0.02    8.4          857
+32GB · Gen3 1.5 · cpu · b1               naive_single    17*  12918.0   ssd  0.09  0.00   0.02    8.4          836
 32GB · Gen3 1.5 · cpu · tape             tape          infeasible: trunk + KV exceed RAM
 
-32GB · Gen3 1.5 · cpu · b8               union_lru       14*  10209.9   ssd  0.00  0.00   0.09    9.2        3,625
-32GB · Gen3 1.5 · cpu · b8               skip            14*   7650.0   ssd  0.06  0.08   0.10    9.2        4,215
+32GB · Gen3 1.5 · cpu · b8               union_lru       16*  10188.8   ssd  0.00  0.00   0.08    9.2        3,579
+32GB · Gen3 1.5 · cpu · b8               skip            16*   7528.2   ssd  0.07  0.08   0.10    9.2        4,179
 32GB · Gen3 1.5 · cpu · tape             tape          infeasible: trunk + KV exceed RAM
 
-32GB · layout 3.2 · cpu · b8             union_lru       14*  10209.9   ssd  0.00  0.00   0.18    7.1        7,622
-32GB · layout 3.2 · cpu · b8             skip            14*   7650.0   ssd  0.06  0.08   0.21    6.6        8,865
+32GB · layout 3.2 · cpu · b8             union_lru       16*  10188.8   ssd  0.00  0.00   0.18    7.1        7,527
+32GB · layout 3.2 · cpu · b8             skip            16*   7528.2   ssd  0.07  0.08   0.21    6.6        8,792
 32GB · layout 3.2 · cpu · tape           tape          infeasible: trunk + KV exceed RAM
 
-128GB · 2 drives 10 · cpu · b32          union_lru       46    5597.8   ssd  0.00  0.00   1.83   28.4       57,244
-128GB · 2 drives 10 · cpu · b32          sisyphus        46    4685.8   ssd  0.16  0.00   2.19   28.4       64,904
-128GB · 2 drives 10 · cpu · b32          decay           46    4880.8   ssd  0.13  0.00   2.10   28.4       63,098
-128GB · 2 drives 10 · cpu · b32          skip            46    3002.9   ssd  0.19  0.07   3.41   26.7       88,316
-128GB · 2 drives 10 · cpu · tape b107    tape             0p   7472.8   ssd     -     -   1.64   95.0       52,932
+128GB · 2 drives 10 · cpu · b32          union_lru       53    5586.3   ssd  0.00  0.00   1.83   28.4       57,330
+128GB · 2 drives 10 · cpu · b32          sisyphus        53    4471.1   ssd  0.20  0.00   2.29   28.4       67,015
+128GB · 2 drives 10 · cpu · b32          decay           53    4656.3   ssd  0.17  0.00   2.20   28.4       65,187
+128GB · 2 drives 10 · cpu · b32          skip            53    2782.6   ssd  0.25  0.07   3.68   26.7       92,379
+128GB · 2 drives 10 · cpu · tape b221    tape             0p   3610.6   ssd     -     -   3.40  196.1       86,085
 
-128GB · 2 drives · GPU x16 · b32         union_lru      106    5597.8   ssd  0.00  0.00   1.83    1.2       77,803
-128GB · 2 drives · GPU x16 · b32         decay          106    3295.2   ssd  0.41  0.00   3.11    1.2      130,758
-128GB · 2 drives · GPU x16 · b32         skip           106    1428.1   ssd  0.62  0.07   7.17    1.2      291,803
-128GB · 2 drives · GPU x16 · tape b227   tape             0p   3522.4   ssd     -     -   3.49    4.0      148,548
+128GB · 2 drives · GPU x16 · b32         union_lru      115    5586.3   ssd  0.00  0.00   1.83    1.2       77,964
+128GB · 2 drives · GPU x16 · b32         decay          115    3263.7   ssd  0.42  0.00   3.14    1.2      131,995
+128GB · 2 drives · GPU x16 · b32         skip           115    1406.3   ssd  0.62  0.07   7.28    1.2      296,091
+128GB · 2 drives · GPU x16 · tape b487   tape             0p   1638.5   ssd     -     -   7.50    8.6      314,181
 
-128GB · 2 drives · GPU x16 · b96         decay           74    2923.3   ssd  0.18  0.00   3.50    1.7      149,152
-128GB · 2 drives · GPU x16 · b96         skip            74    1335.4   ssd  0.32  0.06   7.67    1.6      321,509
-128GB · 2 drives · GPU x16 · tape b227   tape             0p   3522.4   ssd     -     -   3.49    4.0      148,548
+128GB · 2 drives · GPU x16 · b96         decay          100    2759.5   ssd  0.22  0.00   3.71    1.7      157,872
+128GB · 2 drives · GPU x16 · b96         skip           100    1180.4   ssd  0.40  0.06   8.68    1.6      362,334
+128GB · 2 drives · GPU x16 · tape b487   tape             0p   1638.5   ssd     -     -   7.50    8.6      314,181
 
-192GB · 2 drives 10 · cpu · b32          union_lru      110    5597.8   ssd  0.00  0.00   1.83   28.4       57,244
-192GB · 2 drives 10 · cpu · b32          sisyphus       110    3248.3   ssd  0.42  0.00   3.15   28.4       82,252
-192GB · 2 drives 10 · cpu · b32          decay          110    3284.0   ssd  0.41  0.00   3.12   28.4       81,710
-192GB · 2 drives 10 · cpu · b32          skip           110    1419.2   cpu  0.62  0.07   5.10   26.8      110,145
-192GB · 2 drives 10 · cpu · tape b235    tape             0p   3402.5   ssd     -     -   3.61  208.6       89,091
+192GB · 2 drives 10 · cpu · b32          union_lru      117    5586.3   ssd  0.00  0.00   1.83   28.4       57,330
+192GB · 2 drives 10 · cpu · b32          sisyphus       117    3214.6   ssd  0.42  0.00   3.19   28.4       82,771
+192GB · 2 drives 10 · cpu · b32          decay          117    3258.2   ssd  0.42  0.00   3.14   28.4       82,100
+192GB · 2 drives 10 · cpu · b32          skip           117    1401.6   cpu  0.63  0.07   5.10   26.8      110,123
+192GB · 2 drives 10 · cpu · tape b324    tape            40p   2336.4   cpu     -     -   4.81  287.5      103,846
 
-192GB · 2 drives · cpu 2x kernels · b32  decay          110    3284.0   ssd  0.41  0.00   3.12   14.2      101,719
-192GB · 2 drives · cpu 2x kernels · b32  skip           110    1419.2   ssd  0.62  0.07   7.22   13.4      182,552
-192GB · 2 drives · cpu 2x kernels · tape b235 tape             0p   3402.5   ssd     -     -   3.61  104.3      113,416
+192GB · 2 drives · cpu 2x kernels · b32  decay          117    3258.2   ssd  0.42  0.00   3.14   14.2      102,325
+192GB · 2 drives · cpu 2x kernels · b32  skip           117    1401.6   ssd  0.63  0.07   7.31   13.4      183,869
+192GB · 2 drives · cpu 2x kernels · tape b496 tape             0p   1608.8   ssd     -     -   7.64  220.1      183,892
 
-192GB · 2 drives · GPU trunk only · b32  decay          170    3122.3   ssd  0.44  0.00   3.28   12.6      108,839
-192GB · 2 drives · GPU trunk only · b32  skip           170    1268.4   ssd  0.67  0.07   8.07   11.0      211,340
-192GB · 2 drives · GPU trunk only · tape b355 tape             0p   2252.4   ssd     -     -   5.46  139.3      156,921
+192GB · 2 drives · GPU trunk only · b32  decay          179    3066.5   ssd  0.45  0.00   3.34   12.6      110,355
+192GB · 2 drives · GPU trunk only · b32  skip           179    1246.6   ssd  0.67  0.07   8.21   11.0      213,494
+192GB · 2 drives · GPU trunk only · tape b762 tape             0p   1047.2   cpu     -     -  10.87  299.1      234,783
 
-192GB · 2 drives · GPU x16 · b32         union_lru      170    5597.8   ssd  0.00  0.00   1.83    1.2       77,803
-192GB · 2 drives · GPU x16 · b32         decay          170    3122.3   ssd  0.44  0.00   3.28    1.2      137,799
-192GB · 2 drives · GPU x16 · b32         skip           170    1268.4   ssd  0.67  0.07   8.07    1.2      326,161
-192GB · 2 drives · GPU x16 · tape b355   tape             0p   2252.4   ssd     -     -   5.46    6.3      230,451
+192GB · 2 drives · GPU x16 · b32         union_lru      179    2954.6   ssd  0.47  0.00   3.47    1.2      145,402
+192GB · 2 drives · GPU x16 · b32         decay          179    3066.5   ssd  0.45  0.00   3.34    1.2      140,246
+192GB · 2 drives · GPU x16 · b32         skip           179    1246.6   ssd  0.67  0.07   8.21    1.2      331,534
+192GB · 2 drives · GPU x16 · tape b762   tape             0p   1047.2   ssd     -     -  11.73   13.5      483,337
 
-192GB · 2 drives · GPU x16 · b128        decay          122    2535.5   ssd  0.20  0.00   4.04    2.3      171,585
-192GB · 2 drives · GPU x16 · b128        skip           122    1104.8   ssd  0.37  0.06   9.27    2.2      386,154
-192GB · 2 drives · GPU x16 · tape b355   tape             0p   2252.4   ssd     -     -   5.46    6.3      230,451
+192GB · 2 drives · GPU x16 · b128        decay          156    2466.4   ssd  0.22  0.00   4.15    2.3      176,310
+192GB · 2 drives · GPU x16 · b128        skip           156    1054.6   ssd  0.41  0.05   9.71    2.2      403,849
+192GB · 2 drives · GPU x16 · tape b762   tape             0p   1047.2   ssd     -     -  11.73   13.5      483,337
 
-192GB · GPU x16 + 4 drives (M.2) 20 · b128 decay          122    2535.5   ssd  0.20  0.00   8.08    2.3      337,591
-192GB · GPU x16 + 4 drives (M.2) 20 · b128 skip           122    1104.8   ssd  0.37  0.06  18.54    2.2      745,792
-192GB · GPU x16 + 4 drives (M.2) 20 · tape b355 tape             0p   2252.4   ssd     -     -  13.64    6.3      557,569
+192GB · GPU x16 + 4 drives (M.2) 20 · b128 decay          156    2466.4   ssd  0.22  0.00   8.30    2.3      346,733
+192GB · GPU x16 + 4 drives (M.2) 20 · b128 skip           156    1054.6   ssd  0.41  0.05  19.42    2.2      778,714
+192GB · GPU x16 + 4 drives (M.2) 20 · tape b762 tape             0p   1047.2   ssd     -     -  29.34   13.5    1,129,486
 
-192GB · GPU x8 + 4 drives 25 · b128      decay          122    2535.5  pcie  0.20  0.00   8.09    2.3      337,971
-192GB · GPU x8 + 4 drives 25 · b128      skip           122    1104.8  pcie  0.37  0.06  14.64    2.2      597,631
-192GB · GPU x8 + 4 drives 25 · tape b355 tape             0p   2252.4  pcie     -     -  11.37    6.3      468,836
+192GB · GPU x8 + 4 drives 25 · b128      decay          156    2466.4  pcie  0.22  0.00   8.10    2.3      338,647
+192GB · GPU x8 + 4 drives 25 · b128      skip           156    1054.6  pcie  0.41  0.05  14.41    2.2      588,717
+192GB · GPU x8 + 4 drives 25 · tape b762 tape             0p   1047.2  pcie     -     -  24.45   13.5      958,616
 
-256GB · 2 drives 10 · cpu · b64          union_lru      158    4162.2   ssd  0.00  0.00   2.46   56.8       70,306
-256GB · 2 drives 10 · cpu · b64          sisyphus       158    2785.4   ssd  0.33  0.00   3.68   56.8       89,998
-256GB · 2 drives 10 · cpu · b64          decay          158    2849.8   ssd  0.32  0.00   3.59   56.8       88,833
-256GB · 2 drives 10 · cpu · b64          skip           158    1150.3   cpu  0.54  0.06   5.07   53.9      109,460
-256GB · 2 drives 10 · cpu · tape b363    tape             0p   2202.7   cpu     -     -   4.81  322.2      103,846
+256GB · 2 drives 10 · cpu · b64          union_lru      173    4153.6   ssd  0.00  0.00   2.47   56.8       70,402
+256GB · 2 drives 10 · cpu · b64          sisyphus       173    2730.9   ssd  0.34  0.00   3.75   56.8       91,008
+256GB · 2 drives 10 · cpu · b64          decay          173    2801.6   ssd  0.33  0.00   3.66   56.8       89,703
+256GB · 2 drives 10 · cpu · b64          skip           173    1110.9   cpu  0.56  0.06   5.06   53.9      109,385
+256GB · 2 drives 10 · cpu · tape b685    tape            20p   1135.0   cpu     -     -   4.81  607.9      103,846
 
-256GB · 2 drives · GPU x16 · b128        decay          186    2407.3   ssd  0.24  0.00   4.25    2.3      180,569
-256GB · 2 drives · GPU x16 · b128        skip           186    1006.9   ssd  0.45  0.05  10.17    2.2      422,219
-256GB · 2 drives · GPU x16 · tape b483   tape             0p   1655.5   ssd     -     -   7.42    8.6      311,055
+256GB · 2 drives · GPU x16 · b128        decay          220    2316.9   ssd  0.27  0.00   4.42    2.3      187,488
+256GB · 2 drives · GPU x16 · b128        skip           220     943.4   ssd  0.49  0.05  10.85    2.2      449,443
+256GB · 2 drives · GPU x16 · tape b1037  tape             0p    769.5   ssd     -     -  15.97   18.4      646,903
 
 ```
 
@@ -110,18 +110,18 @@ machine                                  policy        cache   MB/tok bound   hi
 ```
 TAPE REGIME — whole-model sequential sweep, no routing assumption, ctx 1024, prompt 512 / decode 256 per job
    RAM  drives  compute  batch  pinned  KV GB  ssd s comp s  tok/s bound  pre m    tok/night
-   128      12      cpu     80       0     53     65     17   1.23   ssd   71.0       42,295
-   128      12  gpu-x16    170       0    113     65     16   2.61   ssd    3.0      111,648
-   128      40      cpu     80       0     53     20     17   4.10   ssd   71.0       95,572
-   128      40  gpu-x16    170       0    113     20     16   8.71   ssd    3.0      363,053
-   192      12      cpu    176       0    117     65     37   2.70   ssd  156.2       74,777
-   192      12  gpu-x16    266       0    177     65     16   4.09   ssd    4.7      173,642
-   192      40      cpu    176       0    117     20     37   4.81   cpu  156.2      103,846
-   192      40  gpu-x16    266       0    177     20     16  13.63   ssd    4.7      557,073
-   256      12      cpu    272       0    181     65     57   4.18   ssd  241.4       96,594
-   256      12  gpu-x16    362       0    241     65     16   5.56   ssd    6.4      234,893
-   256      40      cpu    242      20    161     19     50   4.81   cpu  214.8      103,846
-   256      40  gpu-x16    362       0    241     20     16  18.54   ssd    6.4      743,723
+   128      12      cpu    215       0     52     65     45   3.31   ssd  190.8       84,701
+   128      12  gpu-x16    473       0    113     65     16   7.28   ssd    8.4      305,415
+   128      40      cpu    215       0     52     19     45   4.81   cpu  190.8      103,846
+   128      40  gpu-x16    473       0    113     19     16  24.28   ssd    8.4      952,674
+   192      12      cpu    315      40     75     62     66   4.81   cpu  279.6      103,846
+   192      12  gpu-x16    740       0    177     65     16  11.40   ssd   13.1      470,014
+   192      40      cpu    315      40     75     18     66   4.81   cpu  279.6      103,846
+   192      40  gpu-x16    740       0    177     19     16  37.99   ssd   13.1    1,417,059
+   256      12      cpu    665      20    159     63    138   4.81   cpu  590.2      103,846
+   256      12  gpu-x16   1007       0    241     65     16  15.51   ssd   17.9      629,322
+   256      40      cpu    665      20    159     19    138   4.81   cpu  590.2      103,846
+   256      40  gpu-x16   1007       0    241     19     16  51.69   ssd   17.9    1,837,861
 ```
 
 ## Sensitivity — routing unknowns
@@ -130,49 +130,49 @@ TAPE REGIME — whole-model sequential sweep, no routing assumption, ctx 1024, p
 SENSITIVITY on 192GB · 2 drives 10 · cpu, batch 32 — every bracketed unknown, one at a time
   variation                          policy     MB/tok   hit  skip  tok/s    tok/night
   -- hot_mass (concentration) --
-  weak hot_mass=0.6                  decay        4895  0.32  0.00   2.09       62,974
-  weak hot_mass=0.6                  skip         2897  0.44  0.08   3.54       90,343
-  expected hot_mass=0.75             decay        3284  0.41  0.00   3.12       81,710
-  expected hot_mass=0.75             skip         1419  0.62  0.07   5.10      110,145
-  strong hot_mass=0.85               decay        2125  0.52  0.00   4.81      103,846
-  strong hot_mass=0.85               skip          638  0.78  0.05   5.04      108,791
+  weak hot_mass=0.6                  decay        4853  0.32  0.00   2.11       63,352
+  weak hot_mass=0.6                  skip         2865  0.45  0.08   3.57       90,935
+  expected hot_mass=0.75             decay        3258  0.42  0.00   3.14       82,100
+  expected hot_mass=0.75             skip         1402  0.63  0.07   5.10      110,123
+  strong hot_mass=0.85               decay        2111  0.52  0.00   4.81      103,846
+  strong hot_mass=0.85               skip          630  0.79  0.05   5.04      108,761
   -- hot_frac (does the hot set fit?) --
-  hot_frac=0.05 (hot set 38 GB)      union_lru    4709  0.00  0.00   2.17       64,681
-  hot_frac=0.05 (hot set 38 GB)      decay        3399  0.28  0.00   3.01       80,013
-  hot_frac=0.05 (hot set 38 GB)      skip         1457  0.48  0.07   5.11      110,314
-  hot_frac=0.1 (hot set 78 GB)       union_lru    5598  0.00  0.00   1.83       57,244
-  hot_frac=0.1 (hot set 78 GB)       decay        3284  0.41  0.00   3.12       81,710
-  hot_frac=0.1 (hot set 78 GB)       skip         1419  0.62  0.07   5.10      110,145
-  hot_frac=0.15 (hot set 117 GB)     union_lru    6491  0.00  0.00   1.58       51,311
-  hot_frac=0.15 (hot set 117 GB)     decay        3715  0.43  0.00   2.76       75,684
-  hot_frac=0.15 (hot set 117 GB)     skip         1889  0.60  0.07   5.09      110,041
-  hot_frac=0.2 (hot set 156 GB)      union_lru    7243  0.00  0.00   1.41       47,195
-  hot_frac=0.2 (hot set 156 GB)      decay        5127  0.29  0.00   2.00       60,956
-  hot_frac=0.2 (hot set 156 GB)      skip         3323  0.39  0.07   3.08       82,922
-  hot_frac=0.3 (hot set 234 GB)      union_lru    8351  0.00  0.00   1.23       42,208
-  hot_frac=0.3 (hot set 234 GB)      decay        6767  0.19  0.00   1.51       49,723
-  hot_frac=0.3 (hot set 234 GB)      skip         4969  0.24  0.07   2.06       63,361
+  hot_frac=0.05 (hot set 38 GB)      union_lru    4700  0.00  0.00   2.18       64,773
+  hot_frac=0.05 (hot set 38 GB)      decay        3372  0.28  0.00   3.04       80,401
+  hot_frac=0.05 (hot set 38 GB)      skip         1437  0.49  0.07   5.11      110,294
+  hot_frac=0.1 (hot set 77 GB)       union_lru    5586  0.00  0.00   1.83       57,330
+  hot_frac=0.1 (hot set 77 GB)       decay        3258  0.42  0.00   3.14       82,100
+  hot_frac=0.1 (hot set 77 GB)       skip         1402  0.63  0.07   5.10      110,123
+  hot_frac=0.15 (hot set 117 GB)     union_lru    6478  0.00  0.00   1.58       51,391
+  hot_frac=0.15 (hot set 117 GB)     decay        3345  0.48  0.00   3.06       80,793
+  hot_frac=0.15 (hot set 117 GB)     skip         1520  0.67  0.07   5.09      110,022
+  hot_frac=0.2 (hot set 156 GB)      union_lru    7228  0.00  0.00   1.42       47,270
+  hot_frac=0.2 (hot set 156 GB)      decay        4885  0.32  0.00   2.10       63,061
+  hot_frac=0.2 (hot set 156 GB)      skip         3086  0.43  0.07   3.32       86,783
+  hot_frac=0.3 (hot set 233 GB)      union_lru    8334  0.00  0.00   1.23       42,277
+  hot_frac=0.3 (hot set 233 GB)      decay        6609  0.21  0.00   1.55       50,623
+  hot_frac=0.3 (hot set 233 GB)      skip         4818  0.27  0.07   2.13       64,761
   -- coherence (do same-domain jobs share a hot pool?) --
-  coherent=True                      decay        3284  0.41  0.00   3.12       81,710
-  coherent=True                      skip         1419  0.62  0.07   5.10      110,145
-  coherent=False                     decay        9922  0.09  0.00   1.03       36,706
-  coherent=False                     skip         8089  0.12  0.07   1.27       43,796
+  coherent=True                      decay        3258  0.42  0.00   3.14       82,100
+  coherent=True                      skip         1402  0.63  0.07   5.10      110,123
+  coherent=False                     decay        9824  0.10  0.00   1.04       37,008
+  coherent=False                     skip         7996  0.13  0.07   1.28       44,201
   -- cold gate weight (how skippable is the tail?) --
-  cold_weight_ratio=0.3              skip          813  0.74  0.06   5.20      112,301
-  cold_weight_ratio=0.5              skip         1419  0.62  0.07   5.10      110,145
-  cold_weight_ratio=0.8              skip         1950  0.54  0.07   5.01      108,279
-  cold_weight_ratio=1.0              skip         2403  0.49  0.05   4.26       98,846
+  cold_weight_ratio=0.3              skip          803  0.75  0.06   5.20      112,249
+  cold_weight_ratio=0.5              skip         1402  0.63  0.07   5.10      110,123
+  cold_weight_ratio=0.8              skip         1931  0.55  0.07   5.01      108,261
+  cold_weight_ratio=1.0              skip         2381  0.50  0.05   4.30       99,330
   -- skip budget (gate mass droppable per token-layer) --
-  skip_budget=0.0                    skip         3284  0.41  0.00   3.12       81,710
-  skip_budget=0.03                   skip         2817  0.45  0.01   3.64       89,982
-  skip_budget=0.06                   skip         2193  0.51  0.04   4.67      104,056
-  skip_budget=0.1                    skip         1419  0.62  0.07   5.10      110,145
-  skip_budget=0.2                    skip          567  0.81  0.11   5.24      113,226
+  skip_budget=0.0                    skip         3258  0.42  0.00   3.14       82,100
+  skip_budget=0.03                   skip         2793  0.46  0.01   3.67       90,413
+  skip_budget=0.06                   skip         2171  0.52  0.04   4.72      104,590
+  skip_budget=0.1                    skip         1402  0.63  0.07   5.10      110,123
+  skip_budget=0.2                    skip          561  0.81  0.11   5.24      113,167
   -- demand decay --
-  decay=1.0                          decay        3248  0.42  0.00   3.15       82,252
-  decay=0.95                         decay        3268  0.42  0.00   3.13       81,954
-  decay=0.8                          decay        3284  0.41  0.00   3.12       81,710
-  decay=0.5                          decay        3322  0.41  0.00   3.08       81,136
+  decay=1.0                          decay        3215  0.42  0.00   3.19       82,771
+  decay=0.95                         decay        3241  0.42  0.00   3.16       82,363
+  decay=0.8                          decay        3258  0.42  0.00   3.14       82,100
+  decay=0.5                          decay        3306  0.41  0.00   3.10       81,386
 ```
 
 ## Sensitivity — compute unknowns
@@ -182,30 +182,30 @@ COMPUTE SENSITIVITY — 192 GB, 2 drives, batch 32: the constants Phase 0 measur
   variation                                    policy  tok/s bound  pre m    tok/night
   -- CPU effective TFLOPS (decode kernels) --
   cpu 0.5 TFLOPS                               decay    2.40   cpu   56.8       51,923
-  cpu 0.5 TFLOPS                               skip     2.55   cpu   53.5       55,083
-  cpu 1.0 TFLOPS                               decay    3.01   ssd   28.4       79,950
-  cpu 1.0 TFLOPS                               skip     5.10   cpu   26.8      110,165
-  cpu 2.0 TFLOPS                               decay    3.01   ssd   14.2       99,006
-  cpu 2.0 TFLOPS                               skip     6.68   ssd   13.4      174,306
-  cpu 4.0 TFLOPS                               decay    3.01   ssd    7.1      112,401
-  cpu 4.0 TFLOPS                               skip     6.68   ssd    6.7      217,280
+  cpu 0.5 TFLOPS                               skip     2.55   cpu   53.5       55,073
+  cpu 1.0 TFLOPS                               decay    3.03   ssd   28.4       80,296
+  cpu 1.0 TFLOPS                               skip     5.10   cpu   26.8      110,145
+  cpu 2.0 TFLOPS                               decay    3.03   ssd   14.2       99,537
+  cpu 2.0 TFLOPS                               skip     6.74   ssd   13.4      175,309
+  cpu 4.0 TFLOPS                               decay    3.03   ssd    7.1      113,086
+  cpu 4.0 TFLOPS                               skip     6.74   ssd    6.7      218,850
   -- CPU prefill GEMM gain over decode --
-  cpu 1 TFLOPS, gemm gain x1.0                 skip     5.10   cpu   53.5       73,444
-  cpu 1 TFLOPS, gemm gain x2.0                 skip     5.10   cpu   26.8      110,165
-  cpu 1 TFLOPS, gemm gain x4.0                 skip     5.10   cpu   13.4      146,887
+  cpu 1 TFLOPS, gemm gain x1.0                 skip     5.10   cpu   53.5       73,430
+  cpu 1 TFLOPS, gemm gain x2.0                 skip     5.10   cpu   26.8      110,145
+  cpu 1 TFLOPS, gemm gain x4.0                 skip     5.10   cpu   13.4      146,860
   -- DRAM bandwidth (dual-channel 80 vs quad-channel 200) --
-  cpu 1 TFLOPS, DRAM 60 GB/s                   skip     5.10   cpu   26.8      110,165
-  cpu 1 TFLOPS, DRAM 80 GB/s                   skip     5.10   cpu   26.8      110,165
-  cpu 1 TFLOPS, DRAM 200 GB/s                  skip     5.10   cpu   26.8      110,165
+  cpu 1 TFLOPS, DRAM 60 GB/s                   skip     5.10   cpu   26.8      110,145
+  cpu 1 TFLOPS, DRAM 80 GB/s                   skip     5.10   cpu   26.8      110,145
+  cpu 1 TFLOPS, DRAM 200 GB/s                  skip     5.10   cpu   26.8      110,145
   -- GPU path: PCIe width and GPU speed --
-  GPU stream, PCIe 25 GB/s, 100 TFLOPS         decay    3.13   ssd    1.2      131,827
-  GPU stream, PCIe 25 GB/s, 100 TFLOPS         skip     6.72  pcie    1.2      274,284
-  GPU stream, PCIe 50 GB/s, 100 TFLOPS         decay    3.13   ssd    1.2      131,827
-  GPU stream, PCIe 50 GB/s, 100 TFLOPS         skip     7.37   ssd    1.2      299,263
-  GPU stream, PCIe 50 GB/s, 40 TFLOPS          decay    3.13   ssd    1.4      131,101
-  GPU stream, PCIe 50 GB/s, 40 TFLOPS          skip     7.37   ssd    1.3      296,716
-  GPU stream, PCIe 60 GB/s, 100 TFLOPS         decay    3.13   ssd    1.2      131,827
-  GPU stream, PCIe 60 GB/s, 100 TFLOPS         skip     7.37   ssd    1.2      299,263
+  GPU stream, PCIe 25 GB/s, 100 TFLOPS         decay    3.20   ssd    1.2      134,434
+  GPU stream, PCIe 25 GB/s, 100 TFLOPS         skip     6.71  pcie    1.2      274,211
+  GPU stream, PCIe 50 GB/s, 100 TFLOPS         decay    3.20   ssd    1.2      134,434
+  GPU stream, PCIe 50 GB/s, 100 TFLOPS         skip     7.48   ssd    1.2      303,577
+  GPU stream, PCIe 50 GB/s, 40 TFLOPS          decay    3.20   ssd    1.4      133,672
+  GPU stream, PCIe 50 GB/s, 40 TFLOPS          skip     7.48   ssd    1.3      300,913
+  GPU stream, PCIe 60 GB/s, 100 TFLOPS         decay    3.20   ssd    1.2      134,434
+  GPU stream, PCIe 60 GB/s, 100 TFLOPS         skip     7.48   ssd    1.2      303,577
 ```
 
 ## Batch curve (also the deferral curve)
@@ -213,11 +213,11 @@ COMPUTE SENSITIVITY — 192 GB, 2 drives, batch 32: the constants Phase 0 measur
 ```
 BATCH CURVE — 192 GB, 2 drives, skip policy: CPU compute vs GPU streaming (x16)
   batch  cache  MB/tok | cpu tok/s bound    /night | gpu tok/s bound    /night |  tape cpu  tape gpu
-     16    118    1868 |      5.11   cpu   110,429 |      5.84   ssd   229,413 |    10,105    10,581
-     32    110    1534 |      5.10   cpu   110,165 |      7.37   ssd   299,263 |    19,273    21,162
-     64     94    1328 |      5.08   cpu   109,702 |      8.37   ssd   348,977 |    35,273    42,316
-    128     62    1457 |      5.03   cpu   108,718 |      9.02   ssd   376,032 |    60,304    84,288
-    192     30    1446 |      4.99   cpu   107,748 |      9.21   ssd   383,844 |    78,989   125,922
+     16    120    1845 |      5.11   cpu   110,410 |      5.87   ssd   230,294 |    10,125    10,603
+     32    117    1519 |      5.10   cpu   110,145 |      7.48   ssd   303,577 |    19,309    21,206
+     64    109    1303 |      5.08   cpu   109,662 |      8.69   ssd   361,917 |    35,334    42,403
+    128     94    1163 |      5.03   cpu   108,695 |      9.39   ssd   391,212 |    60,393    84,461
+    192     79    1114 |      4.99   cpu   107,747 |      9.58   ssd   398,664 |    79,090   126,179
 ```
 
 ## Night pipeline (mixed domains, one shared cache)
@@ -225,14 +225,14 @@ BATCH CURVE — 192 GB, 2 drives, skip policy: CPU compute vs GPU streaming (x16
 ```
 NIGHT PIPELINE on 192GB · 2 drives 10 · cpu (cpu and GPU x16) — 64 mixed jobs -> convoys of 32, one shared cache
   compute  policy     convoys  cache  MB/tok   hit  skip    tok/night
-  cpu      union_lru        2    110    5609  0.00  0.00       57,158
-  cpu      sisyphus         2    110    3823  0.32  0.00       74,309
-  cpu      decay            2    110    3412  0.39  0.00       79,819
-  cpu      skip             2    110    1560  0.59  0.07      110,124
-  gpu-x16  union_lru        2    170    5609  0.00  0.00       77,644
-  gpu-x16  sisyphus         2    170    2982  0.47  0.00      144,118
-  gpu-x16  decay            2    170    3051  0.46  0.00      140,944
-  gpu-x16  skip             2    170    1229  0.68  0.07      335,921
+  cpu      union_lru        2    117    5598  0.00  0.00       57,244
+  cpu      sisyphus         2    117    3713  0.34  0.00       75,710
+  cpu      decay            2    117    3364  0.40  0.00       80,516
+  cpu      skip             2    117    1521  0.60  0.07      110,099
+  gpu-x16  union_lru        2    179    2912  0.48  0.00      147,482
+  gpu-x16  sisyphus         2    179    2941  0.47  0.00      146,046
+  gpu-x16  decay            2    179    3004  0.46  0.00      143,062
+  gpu-x16  skip             2    179    1204  0.69  0.07      342,478
   convoy order: auditx32 -> dilix32
 ```
 
