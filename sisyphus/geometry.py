@@ -33,11 +33,11 @@ SHARED_EXPERTS = 2
 EXPERT_LATENT = 3584      # experts' low-rank dimension (was mislabelled LATENT / "MLA latent")
 LATENT = EXPERT_LATENT    # kept for backwards compatibility; NOT a KV quantity
 
-# --- Quant sizing — exact, from tensor offsets across all 19 shards (861.3 GB, 2,573 tensors) ---
-EXPERT_MB = 9.694         # per routed expert (IQ2_XS gate/up, IQ2_XS/IQ3_XXS down); 799.1 GB total
-TRUNK_GB = 62.2           # attention 38.6 (KDA 474 MB/block, MLA 232 MB/block) + shared experts 12.9
-                          # + routed latent projections 8.2 + embed/output 2.5
-MODEL_GB = TRUNK_GB + LAYERS * EXPERTS * EXPERT_MB / 1024.0   # ≈ 860 GB (download is 19 shards)
+# --- Quant sizing — measured from tensor offsets across 16/19 shards (739.3 GB accounted) ---
+EXPERT_MB = 9.694         # per routed expert (IQ2_XS gate/up, IQ2_XS/IQ3_XXS down); 799.1 GB total, exact from 19 shards
+TRUNK_GB = 62.2           # attention 38.6 (KDA 474 MB/block, MLA 232 MB/block) + shared 12.9 + latent proj 8.2 + embed 2.5
+                          # 11.1 + routed latent projections 7.1 + embed/output 2.5, scaled to 93 blocks
+MODEL_GB = TRUNK_GB + LAYERS * EXPERTS * EXPERT_MB / 1000.0   # = 861.3 GB, matches the 19 shards on disk
 
 # --- Per-stream memory: KV for MLA blocks, recurrent state for KDA blocks ---
 # MLA: 576 fp16 values per token per MLA block — 4x smaller than the DeepSeek-style
@@ -91,7 +91,8 @@ DEFAULT_PROMPT_TOKENS = 512   # prompt length per job (prefill cost)
 DEFAULT_DECODE_TOKENS = 256   # generated tokens per job (decode cost)
 NIGHT_HOURS = 12.0
 
-MB_PER_GB = 1024.0
+MB_PER_GB = 1000.0        # decimal throughout: files, drives and DIMMs are all quoted decimal;
+                          # V4 mixed 1024-based GB with decimal MB and under-counted the model by 2%
 
 
 def experts_per_gb(gb: float) -> int:

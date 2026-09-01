@@ -304,7 +304,7 @@ def test_tape_batch_is_bounded_by_kv():
     assert max_batch(128, 1024) < max_batch(192, 1024) < max_batch(256, 1024)
     assert max_batch(128, 1024) < max_batch(128, 512)
     from sisyphus.geometry import KDA_STATE_MB_PER_STREAM, KV_MB_PER_TOKEN
-    assert kv_gb(1, 1024) == pytest.approx((KDA_STATE_MB_PER_STREAM + 1024 * KV_MB_PER_TOKEN) / 1024)
+    assert kv_gb(1, 1024) == pytest.approx((KDA_STATE_MB_PER_STREAM + 1024 * KV_MB_PER_TOKEN) / 1000)
     assert KDA_STATE_MB_PER_STREAM > 1024 * KV_MB_PER_TOKEN   # fixed state dominates KV at 1K ctx
     p = plan_tape(128, 10_000, 1024)
     assert not p.feasible and p.tokens_per_night == 0.0
