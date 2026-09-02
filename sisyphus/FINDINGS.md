@@ -146,6 +146,17 @@ non-empty targets.
 500K on the $480 build now needs speculation plus fp8 *or* the second drive plus a better
 draft; on the $610 build speculation alone is within 8% of it. Input-token path unchanged.
 
+**Sustained streaming, first pass (2026-09-01, `tools/stream_bench.py`, Windows, buffered
+reads, 4 processes per drive, 300 s, both drives concurrently):** D: 2.25 GB/s, C: 2.22 GB/s,
+**aggregate 4.48 GB/s → 192 s sweep**. Both drives peaked ~3 GB/s each for the first 20 s
+then dropped together to an identical 2.2 — the signature of Windows' cache manager
+(buffered reads copy through the page cache; once RAM fills, eviction churn caps the
+machine), not of the NAND (winsat unbuffered got 5.55 on C: alone). Consequence: **the engine
+must use unbuffered high-queue-depth I/O (O_DIRECT + io_uring on Linux; FILE_FLAG_NO_BUFFERING
+on Windows); a naive implementation forfeits half the bandwidth.** Whether the two drives
+sustain 5.5 + 3.0 *concurrently* is still unmeasured — `diskspd -Su -o32` against one file
+per drive is the definitive Windows test; the streamer itself is the Linux one.
+
 ## 6. Earlier findings that still stand (SIM)
 
 - 84% of scheduler-regime bytes are single-use cold experts; only skip/substitute/tape
