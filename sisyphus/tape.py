@@ -233,11 +233,15 @@ def tape_table(context_tokens: int = 1024) -> str:
 # --------------------------------------------------------------------------- #
 RIG_GPU = ComputeModel("3070ti-x16", trunk_on_gpu=True, experts_on_gpu=True,
                        pcie_gbps=22.0, gpu_tflops=40.0)      # PCIe 4.0 x16 confirmed by nvidia-smi
-# MEASURED 2026-09-01 with winsat (sequential 64 KB, unbuffered): 990 PRO 5.55 GB/s, SN570 3.0 GB/s.
-# A new Gen4 drive is assumed to match the 990 PRO's measured class (5.5), not its spec sheet.
-RIG_DRIVES = {"as-is, measured (990 PRO 5.55 + SN570 3.0)": 8.5,
-              "+1 Gen4 drive (5.5), split by bandwidth": 14.0,
-              "+2 Gen4 drives, chipset uplink capped": 18.5}
+# MEASURED 2026-09-01 with diskspd (tools/diskspd_bench.ps1: 8 MB sequential, QD32 x 2 threads,
+# unbuffered, both drives CONCURRENTLY for 180 s): 990 PRO 7.07 GB/s + SN570 3.47 GB/s = 10.55 GB/s
+# aggregate, identical to each drive alone -> no shared-bus contention between the CPU M.2 slot
+# and the chipset. (winsat's 5.55 / 3.0 was a 64 KB low-QD test; the buffered stream_bench
+# 4.48 was Windows' cache manager.) A new Gen4 drive on a chipset slot is assumed at 6.5 GB/s;
+# the Z690 chipset uplink (DMI 4.0 x8) is taken as ~13 GB/s usable, shared by SN570 + new drives.
+RIG_DRIVES = {"as-is, measured (990 PRO 7.07 + SN570 3.47)": 10.55,
+              "+1 Gen4 drive (6.5), split by bandwidth": 17.0,
+              "+2 Gen4 drives, chipset uplink capped ~13": 20.0}
 
 
 def rig_levers_table(prompt: int = 256, decode: int = 256, overlap: float = 0.85) -> str:

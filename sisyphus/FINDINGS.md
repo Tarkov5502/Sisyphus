@@ -29,17 +29,19 @@ i7-12700KF (8P+4E, no AVX-512) · MSI PRO Z690-A WIFI (4 DIMM, 2 free; M.2: M2_1
 M2_2 chipset Gen4, M2_3 chipset Gen3, M2_4 chipset Gen4; chipset uplink ~13 GB/s achievable)
 · 2×16 GB DDR5-4800 (confirmed) · RTX 3070 Ti 8 GB, **PCIe 4.0 x16 confirmed** (nvidia-smi link
 4/4, width 16/16; ~22 GB/s, ~40 TFLOPS effective) · Samsung 990 PRO 4 TB = **C:** (1,008 GB free),
-**measured 5.55 GB/s** sequential (winsat, 2026-09-01; spec 7.4) · WD SN570 1 TB = **D:**, holds the
-model, **measured 3.0 GB/s** · Windows (dev); production must be native Linux (io_uring QD32 should
-recover some of the gap to spec).
+**measured 7.07 GB/s** sustained unbuffered sequential (diskspd QD32, 2026-09-01; spec 7.4) · WD
+SN570 1 TB = **D:**, holds the model, **measured 3.47 GB/s** (spec 3.5) · **both concurrently for
+180 s: 7.07 + 3.47 = 10.55 GB/s aggregate, no contention** (`rig_diskspd.json`) · Windows (dev);
+production is native Linux (io_uring + O_DIRECT is the same I/O pattern diskspd used).
 
 ## 3. The bounds (CALC)
 
 For a target of T tokens/night with lockstep batch B and sweep time s:
 
 - **SSD:** tape regime reads the whole model per step: `s ≥ 861 GB / bandwidth`. As-is
-  **measured 8.5 GB/s** → 101 s; +1 Gen4 drive split by bandwidth ~14 GB/s → 62 s; +2 drives
-  ~18.5 GB/s (chipset uplink cap) → 47 s; ×1/0.85 for realistic overlap.
+  **measured 10.55 GB/s** → 82 s; +1 Gen4 drive (assumed 6.5) split by bandwidth ~17 GB/s → 51 s;
+  +2 drives ~20 GB/s (chipset uplink ~13 GB/s shared by SN570 + new drives) → 43 s; ×1/0.85 for
+  realistic overlap.
 - **Per-stream memory:** `B ≤ (RAM − OS − buffers) / (217 MB + ctx × 0.028 MB)`. 32 GB →
   ~77; 64 GB → ~219; 128 GB → ~500; 192 GB → ~760. **This is the wall.**
 - **Compute:** GPU FLOPs ≈ 40 TFLOPS → 190 tokens/s ceiling for *any* token; irrelevant for
@@ -100,23 +102,28 @@ bytes ~−30%. Quality cost unmeasured; needs the routing profile to choose hot 
 **Stack, modelled (`sisyphus.tape.rig_levers_table`, MEASURED drive speeds, 64 GB, 256/256
 jobs, 85% overlap; acceptance per sweep is geometric, 1 + a + a² + a³ = 2.77 at a=0.7, k=4):**
 
-| lever stack | +1 drive (~14 GB/s, $480 total) | +2 drives (~18.5 GB/s, $610) |
-|---|---|---|
-| plain tape | 125K | 164K |
-| + 5.3 lean RAM + 6 GB VRAM for states | 167K | 219K |
-| + 5.4 sparse sweep (no speculation) | 216K | 283K |
-| 5.3 + 5.1 replayable speculation (k=4, 70%) | **387K** | **503K** |
-| same with naive rollback (2 state copies) | 217K | 284K |
-| 5.3 + 5.1 + 5.5 fp8 state (ASSUMED) | 668K | 857K |
+| lever stack | drives as-is (10.55 GB/s, $350: RAM only) | +1 drive (~17 GB/s, $480) | +2 drives (~20 GB/s, $610) |
+|---|---|---|---|
+| plain tape | 95K | 151K | 177K |
+| + 5.3 lean RAM + 6 GB VRAM for states | 127K | 202K | 237K |
+| + 5.4 sparse sweep (no speculation) | 164K | 261K | 305K |
+| 5.3 + 5.1 replayable speculation, **MEASURED 2.32 tok/sweep** | **272K** | **428K** | **498K** |
+| same, assumed 70% (2.77 tok/sweep) | 296K | 465K | 541K |
+| same with naive rollback (2 state copies) | 165K | 262K | 306K |
+| 5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED) | 475K | 735K | 849K |
 
-Drives as-is (8.5 GB/s measured): plain 76K, speculation 240K, + fp8 421K. At 32 GB the
-whole column is ~half. Input tokens (5.2), 64 GB + 1 drive, 2048/8 jobs: ~6.1 M/night.
+At 32 GB (nothing bought) the same stack is 33K / 66K / 143K (speculation) / 254K (+fp8).
+Input tokens (5.2), 64 GB + 1 drive, 2048/8 jobs: ~6.1 M/night.
 
-**What the measured drives changed (2026-09-01):** the 990 PRO benches at 5.55 GB/s, not the
-7.4 spec, so every sweep is ~30% slower than the first estimate. On the $480 build, 500K
-now needs speculation *and* one of: a second added drive (+$130, $610 total), fp8 state
-(assumed), or io_uring recovering the drives' spec speed on Linux (plausible, unmeasured).
-Regenerate with `python -m sisyphus.results`; the tables live in RESULTS.md.
+**What the measured drives changed (2026-09-01, twice):** winsat's 64 KB low-queue-depth
+test said 5.55 + 3.0 = 8.5 GB/s and the tables were built on that. diskspd at the engine's
+real pattern (8 MB reads, QD32, unbuffered, both drives at once) says **7.07 + 3.47 = 10.55
+GB/s**, i.e. both drives at spec with zero contention between the CPU M.2 slot and the chipset.
+Every sweep is 24% faster than the winsat-based tables. Consequence for the $500 target: with
+measured acceptance, **the $610 build (RAM + 2 drives) lands at 498K with no fp8 and no better
+draft**; the $480 build lands at 428K and reaches 500K with any one of: draft acceptance
+0.56 → ~0.66 (top-3 ceiling is 0.71), fp8 state, or a faster new drive than the 6.5 GB/s
+assumed. Regenerate with `python -m sisyphus.results`; the tables live in RESULTS.md.
 
 **5.1 MEASURED (2026-09-01, `tools/acceptance_test.py`, Moonlight-16B-A3B-Instruct as the
 same-tokenizer draft, teacher-forced against hosted K3's greedy output):**
@@ -143,8 +150,8 @@ non-empty targets.
 | lean + speculation k=4 @ 2.32 tok/sweep | **356K** | **463K** |
 | lean + speculation + fp8 state (assumed) | 617K | 793K |
 
-500K on the $480 build now needs speculation plus fp8 *or* the second drive plus a better
-draft; on the $610 build speculation alone is within 8% of it. Input-token path unchanged.
+With the diskspd drive numbers (below), 500K on the $610 build is speculation alone (498K);
+on the $480 build it is speculation plus one more lever. Input-token path unchanged.
 
 **Sustained streaming, first pass (2026-09-01, `tools/stream_bench.py`, Windows, buffered
 reads, 4 processes per drive, 300 s, both drives concurrently):** D: 2.25 GB/s, C: 2.22 GB/s,
@@ -153,9 +160,17 @@ then dropped together to an identical 2.2 — the signature of Windows' cache ma
 (buffered reads copy through the page cache; once RAM fills, eviction churn caps the
 machine), not of the NAND (winsat unbuffered got 5.55 on C: alone). Consequence: **the engine
 must use unbuffered high-queue-depth I/O (O_DIRECT + io_uring on Linux; FILE_FLAG_NO_BUFFERING
-on Windows); a naive implementation forfeits half the bandwidth.** Whether the two drives
-sustain 5.5 + 3.0 *concurrently* is still unmeasured — `diskspd -Su -o32` against one file
-per drive is the definitive Windows test; the streamer itself is the Linux one.
+on Windows); a naive implementation forfeits half the bandwidth.**
+
+**Sustained streaming, definitive (2026-09-01, `tools/diskspd_bench.ps1`: Microsoft diskspd,
+8 MB sequential reads, QD32 × 2 threads per file, `-Su` unbuffered, one model shard per drive):**
+C: alone 60 s **7.07 GB/s**; D: alone 60 s **3.52 GB/s**; both concurrently 180 s **C: 7.07 +
+D: 3.47 = 10.55 GB/s aggregate → 82 s sweep**. Concurrent equals solo, so the CPU-attached
+M2_1 and the chipset-attached SN570 do not share a bottleneck, and neither drive thermally
+throttled over three minutes of full-rate reads (a 12-hour night still needs checking on
+Linux, but 990 PRO 4 TB throttling under sustained *reads* is not a known problem). This
+replaces the winsat 8.5 GB/s everywhere; the buffered 4.48 GB/s stands as the cost of doing
+I/O the wrong way.
 
 ## 6. Earlier findings that still stand (SIM)
 
@@ -192,7 +207,9 @@ Gen4 NVMe 1 TB ~$130, Gen5 2 TB ~$400 · RTX 3090 used ~$1,300, 4090 used ~$2,50
    sits entirely on the Gen3 SN570. **$0.**
 1. Buy 2×16 GB DDR5-4800 (~$350) → 64 GB. Buy one Gen4 1 TB NVMe (~$130) for M2_2 (a second
    for M2_4 later, +$130, is what carries 500K without fp8). Split the model across the drives
-   by measured bandwidth: 990 PRO 5.55 : new 5.5 : SN570 3.0. C: has 1,008 GB free. **~$480.**
+   by measured bandwidth: 990 PRO 7.07 : new ~6.5 : SN570 3.47 (`tools/repack_plan.py` takes the
+   measured numbers). C: has 1,008 GB free. **~$480**; the second drive (**$610 total**) is what
+   carries 500K on measured acceptance alone.
 2. Test 5.5 on Kimi Linear 48B locally (fp8 vs bf16 state agreement). **$0.**
 3. Engine: tape-mode GPU streaming (expert chunks SSD→RAM ring→VRAM, all-stream hidden
    states in VRAM, KDA states in RAM/VRAM, MLA KV in RAM), then 5.3, then 5.4 or 5.1.
