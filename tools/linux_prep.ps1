@@ -23,6 +23,8 @@
 param(
     [int]$ShrinkGB = 0,
     [switch]$DisableFastStartup,
+    [switch]$FixUnmovable,       # shadow copies + pagefile off (reboot, then shrink); -RestorePagefile afterwards
+    [switch]$RestorePagefile,
     [string]$Dest = "C:\dev\linux"
 )
 $ErrorActionPreference = "Continue"
@@ -121,11 +123,46 @@ if (-not $rufusExe) {
 $res.rufus = if ($rufusExe) { $rufusExe.FullName } else { "missing" }
 Write-Host ("Rufus: {0}" -f $res.rufus)
 
+# ---- 2b. unmovable files (shrink blocked) -----------------------------------------------------
+# Windows can only shrink down to the LAST unmovable cluster on the volume: the pagefile, hiberfil.sys,
+# System Restore shadow copies and the MFT reserve all pin the tail. Turn them off, reboot, consolidate
+# free space, shrink, then put the pagefile back.
+if ($FixUnmovable) {
+    Write-Host "`n== unmovable files =="
+    if (-not $isAdmin) { Write-Host "needs an administrator PowerShell."; }
+    else {
+        Write-Host "deleting System Restore shadow copies on C: (restore points; nothing of yours)..."
+        vssadmin delete shadows /for=C: /all /quiet 2>&1 | Out-Null
+        Write-Host "disabling the pagefile until the next reboot cycle (32 GB RAM is fine for a shrink)..."
+        $cs = Get-CimInstance Win32_ComputerSystem
+        if ($cs.AutomaticManagedPagefile) { Set-CimInstance -InputObject $cs -Property @{ AutomaticManagedPagefile = $false } }
+        Get-CimInstance Win32_PageFileSetting -ErrorAction SilentlyContinue | Remove-CimInstance
+        powercfg /h off | Out-Null
+        Write-Host "  -> REBOOT, then run:  powershell -File tools\linux_prep.ps1 -ShrinkGB 300"
+        Write-Host "     (the script consolidates free space with defrag /X first when -ShrinkGB is given)"
+        Write-Host "     and afterwards:  powershell -File tools\linux_prep.ps1 -RestorePagefile"
+    }
+    $res | ConvertTo-Json | Set-Content -Path $outjson -Encoding ASCII
+    exit 0
+}
+if ($RestorePagefile) {
+    if (-not $isAdmin) { Write-Host "needs an administrator PowerShell."; exit 1 }
+    $cs = Get-CimInstance Win32_ComputerSystem
+    Set-CimInstance -InputObject $cs -Property @{ AutomaticManagedPagefile = $true }
+    Write-Host "pagefile back to system-managed (takes effect after the next reboot)."
+    exit 0
+}
+
 # ---- 3. optional shrink ----------------------------------------------------------------------
 if ($ShrinkGB -gt 0) {
     Write-Host "`n== shrink C: by $ShrinkGB GB =="
     if (-not $isAdmin) { Write-Host "needs an administrator PowerShell."; }
     else {
+        $sup0 = Get-PartitionSupportedSize -DriveLetter C
+        if ((($part.Size - $sup0.SizeMin) / 1GB) -lt $ShrinkGB) {
+            Write-Host "consolidating free space first (defrag C: /X, a few minutes)..."
+            defrag C: /X /H 2>&1 | Select-Object -Last 3 | Write-Host
+        }
         $sup = Get-PartitionSupportedSize -DriveLetter C
         $minGB = [math]::Round($sup.SizeMin / 1GB); $curGB = [math]::Round($part.Size / 1GB)
         $newGB = $curGB - $ShrinkGB
