@@ -17,6 +17,8 @@ DO_TOKEN=1; ONLY_BENCH=0
 for a in "$@"; do case "$a" in --no-token) DO_TOKEN=0;; --bench) ONLY_BENCH=1;; esac; done
 say() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 MODEL_FILE="Kimi-K3-UD-Q2_K_XL-00001-of-00019.gguf"
+WSL=0; grep -qi microsoft /proc/version 2>/dev/null && WSL=1
+[ "$WSL" = 1 ] && echo "(WSL2 detected: dev environment mode - Windows NVIDIA driver, no native drive numbers unless a disk is attached with wsl --mount)"
 
 if [ "$ONLY_BENCH" = 0 ]; then
 # ---- 1. packages ---------------------------------------------------------------------------------
@@ -33,6 +35,8 @@ echo "kernel: $(uname -r)   (io_uring + ntfs3 need >= 5.15; 26.04 ships far newe
 say "NVIDIA"
 if command -v nvidia-smi >/dev/null && nvidia-smi >/dev/null 2>&1; then
     nvidia-smi --query-gpu=name,driver_version,pcie.link.gen.current,pcie.link.width.current --format=csv
+elif [ "$WSL" = 1 ]; then
+    echo "no GPU visible in WSL: update the NVIDIA driver on the Windows side (any recent driver includes WSL support)."
 else
     echo "installing the recommended NVIDIA driver (ubuntu-drivers)..."
     sudo ubuntu-drivers install 2>&1 | tail -3
@@ -57,7 +61,7 @@ while read -r dev fstype label; do
         sudo mkdir -p "$mp"
         sudo mount -t ntfs3 -o ro,noatime,uid=$(id -u),gid=$(id -g) "$dev" "$mp" 2>/dev/null \
             || sudo mount -t ntfs-3g -o ro "$dev" "$mp" 2>/dev/null \
-            || { echo "  could not mount $dev ($label) - Fast Startup still on in Windows?"; continue; }
+            || { echo "  could not mount $dev ($label) - Fast Startup still on in Windows? (in WSL: only disks attached with wsl --mount --bare show up here)"; continue; }
     fi
     echo "  $dev ($label) -> $mp  [$(findmnt -no FSTYPE "$mp")]"
 done < <(lsblk -rno PATH,FSTYPE,LABEL | awk '$2=="ntfs"')
@@ -65,6 +69,7 @@ fi  # ONLY_BENCH
 
 # locate the model shards on whatever is mounted
 mapfile -t SHARD1 < <(find /mnt/win /media "$HOME" -maxdepth 6 -name "$MODEL_FILE" 2>/dev/null)
+[ "${#SHARD1[@]}" = 0 ] && [ "$WSL" = 1 ] && mapfile -t SHARD1 < <(ls /mnt/[a-z]/models/Kimi-K3-GGUF/UD-Q2_K_XL/$MODEL_FILE 2>/dev/null)
 if [ "${#SHARD1[@]}" = 0 ]; then echo "model not found (looked for $MODEL_FILE under /mnt/win, /media, ~)"; MODEL_DIR=""; else
     MODEL_DIR="$(dirname "${SHARD1[0]}")"; echo "model: $MODEL_DIR ($(ls "$MODEL_DIR"/*.gguf | wc -l) shards)"; fi
 
@@ -130,6 +135,9 @@ say "repo"
 python -m pytest -q sisyphus 2>&1 | tail -1
 
 # ---- 6. llama.cpp + first token on Linux ----------------------------------------------------------
+if [ "$WSL" = 1 ] && [ "$DO_TOKEN" = 1 ] && [[ "$MODEL_DIR" == /mnt/[a-z]/* ]]; then
+    echo "skipping first-token run: $MODEL_DIR is a 9p (drvfs) mount, ~1 GB/s - run tools\\first_token.ps1 on Windows instead"; DO_TOKEN=0
+fi
 if [ "$DO_TOKEN" = 1 ] && [ -n "$MODEL_DIR" ]; then
     say "llama.cpp"
     LL="$HOME/dev/llama.cpp"
