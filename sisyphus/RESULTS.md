@@ -132,44 +132,50 @@ THE RIG — K3 tape regime, 3070 Ti streaming, 256/256 jobs, overlap 85%, measur
    32 as-is, measured (990 PRO 5.55 + SN570 3.0) plain tape                                        74  119.2   0.62        26,712       26,712
    32 as-is, measured (990 PRO 5.55 + SN570 3.0) + 5.3 lean RAM + 6 GB VRAM for states            149  119.2   1.25        53,586       53,586
    32 as-is, measured (990 PRO 5.55 + SN570 3.0) + 5.4 sparse sweep (no speculation)              149   68.0   2.19        93,414       93,414
-   32 as-is, measured (990 PRO 5.55 + SN570 3.0) 5.3 + 5.1 replayable speculation k=4 @70%        140  119.2   2.97       126,212      126,212
+   32 as-is, measured (990 PRO 5.55 + SN570 3.0) 5.3 + 5.1 speculation k=4, MEASURED 2.32 tok/sweep     140  119.2   2.72       115,773      115,773
+   32 as-is, measured (990 PRO 5.55 + SN570 3.0)    same, assumed 70% (2.77 tok/sweep)            140  119.2   2.97       126,212      126,212
    32 as-is, measured (990 PRO 5.55 + SN570 3.0)    same, naive rollback (2 state copies)          76  119.2   1.61        69,078       69,078
-   32 as-is, measured (990 PRO 5.55 + SN570 3.0) 5.3 + 5.1 + 5.5 fp8 state (ASSUMED)              253  119.2   5.38       224,839      224,839
+   32 as-is, measured (990 PRO 5.55 + SN570 3.0) 5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)     253  119.2   4.92       206,485      206,485
 
    32 +1 Gen4 drive (5.5), split by bandwidth plain tape                                        74   72.4   1.02        43,894       43,894
    32 +1 Gen4 drive (5.5), split by bandwidth + 5.3 lean RAM + 6 GB VRAM for states            149   72.4   2.06        87,827       87,827
    32 +1 Gen4 drive (5.5), split by bandwidth + 5.4 sparse sweep (no speculation)              149   41.3   3.61       152,552      152,552
-   32 +1 Gen4 drive (5.5), split by bandwidth 5.3 + 5.1 replayable speculation k=4 @70%        140   72.4   4.90       205,502      205,502
+   32 +1 Gen4 drive (5.5), split by bandwidth 5.3 + 5.1 speculation k=4, MEASURED 2.32 tok/sweep     140   72.4   4.49       188,683      188,683
+   32 +1 Gen4 drive (5.5), split by bandwidth    same, assumed 70% (2.77 tok/sweep)            140   72.4   4.90       205,502      205,502
    32 +1 Gen4 drive (5.5), split by bandwidth    same, naive rollback (2 state copies)          76   72.4   2.66       113,062      113,062
-   32 +1 Gen4 drive (5.5), split by bandwidth 5.3 + 5.1 + 5.5 fp8 state (ASSUMED)              253   72.4   8.85       362,848      362,848
+   32 +1 Gen4 drive (5.5), split by bandwidth 5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)     253   72.4   8.11       333,778      333,778
 
    32 +2 Gen4 drives, chipset uplink capped  plain tape                                        74   54.8   1.35        57,887       57,887
    32 +2 Gen4 drives, chipset uplink capped  + 5.3 lean RAM + 6 GB VRAM for states            149   54.8   2.72       115,595      115,595
    32 +2 Gen4 drives, chipset uplink capped  + 5.4 sparse sweep (no speculation)              149   31.2   4.77       200,197      200,197
-   32 +2 Gen4 drives, chipset uplink capped  5.3 + 5.1 replayable speculation k=4 @70%        140   54.8   6.47       269,039      269,039
+   32 +2 Gen4 drives, chipset uplink capped  5.3 + 5.1 speculation k=4, MEASURED 2.32 tok/sweep     140   54.8   5.93       247,208      247,208
+   32 +2 Gen4 drives, chipset uplink capped     same, assumed 70% (2.77 tok/sweep)            140   54.8   6.47       269,039      269,039
    32 +2 Gen4 drives, chipset uplink capped     same, naive rollback (2 state copies)          76   54.8   3.51       148,639      148,639
-   32 +2 Gen4 drives, chipset uplink capped  5.3 + 5.1 + 5.5 fp8 state (ASSUMED)              253   54.8  11.70       471,687      471,687
+   32 +2 Gen4 drives, chipset uplink capped  5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)     253   54.8  10.72       434,463      434,463
 
    64 as-is, measured (990 PRO 5.55 + SN570 3.0) plain tape                                       213  119.2   1.79        76,353       76,353
    64 as-is, measured (990 PRO 5.55 + SN570 3.0) + 5.3 lean RAM + 6 GB VRAM for states            287  119.2   2.41       102,495      102,495
    64 as-is, measured (990 PRO 5.55 + SN570 3.0) + 5.4 sparse sweep (no speculation)              287   91.6   3.13       132,875      132,875
-   64 as-is, measured (990 PRO 5.55 + SN570 3.0) 5.3 + 5.1 replayable speculation k=4 @70%        271  119.2   5.76       240,291      240,291
+   64 as-is, measured (990 PRO 5.55 + SN570 3.0) 5.3 + 5.1 speculation k=4, MEASURED 2.32 tok/sweep     271  119.2   5.27       220,717      220,717
+   64 as-is, measured (990 PRO 5.55 + SN570 3.0)    same, assumed 70% (2.77 tok/sweep)            271  119.2   5.76       240,291      240,291
    64 as-is, measured (990 PRO 5.55 + SN570 3.0)    same, naive rollback (2 state copies)         148  119.2   3.14       133,288      133,288
-   64 as-is, measured (990 PRO 5.55 + SN570 3.0) 5.3 + 5.1 + 5.5 fp8 state (ASSUMED)              488  119.2  10.37       421,224      421,224
+   64 as-is, measured (990 PRO 5.55 + SN570 3.0) 5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)     488  119.2   9.50       387,749      387,749
 
    64 +1 Gen4 drive (5.5), split by bandwidth plain tape                                       213   72.4   2.94       124,885      124,885
    64 +1 Gen4 drive (5.5), split by bandwidth + 5.3 lean RAM + 6 GB VRAM for states            287   72.4   3.97       167,244      167,244
    64 +1 Gen4 drive (5.5), split by bandwidth + 5.4 sparse sweep (no speculation)              287   55.6   5.16       216,220      216,220
-   64 +1 Gen4 drive (5.5), split by bandwidth 5.3 + 5.1 replayable speculation k=4 @70%        271   72.4   9.48       387,248      387,248
+   64 +1 Gen4 drive (5.5), split by bandwidth 5.3 + 5.1 speculation k=4, MEASURED 2.32 tok/sweep     271   72.4   8.69       356,327      356,327
+   64 +1 Gen4 drive (5.5), split by bandwidth    same, assumed 70% (2.77 tok/sweep)            271   72.4   9.48       387,248      387,248
    64 +1 Gen4 drive (5.5), split by bandwidth    same, naive rollback (2 state copies)         148   72.4   5.18       216,884      216,884
-   64 +1 Gen4 drive (5.5), split by bandwidth 5.3 + 5.1 + 5.5 fp8 state (ASSUMED)              488   72.4  17.08       667,998      667,998
+   64 +1 Gen4 drive (5.5), split by bandwidth 5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)     488   72.4  15.64       616,732      616,732
 
    64 +2 Gen4 drives, chipset uplink capped  plain tape                                       213   54.8   3.89       164,093      164,093
    64 +2 Gen4 drives, chipset uplink capped  + 5.3 lean RAM + 6 GB VRAM for states            287   54.8   5.24       219,331      219,331
    64 +2 Gen4 drives, chipset uplink capped  + 5.4 sparse sweep (no speculation)              287   42.1   6.82       282,934      282,934
-   64 +2 Gen4 drives, chipset uplink capped  5.3 + 5.1 replayable speculation k=4 @70%        271   54.8  12.53       502,856      502,856
+   64 +2 Gen4 drives, chipset uplink capped  5.3 + 5.1 speculation k=4, MEASURED 2.32 tok/sweep     271   54.8  11.48       463,346      463,346
+   64 +2 Gen4 drives, chipset uplink capped     same, assumed 70% (2.77 tok/sweep)            271   54.8  12.53       502,856      502,856
    64 +2 Gen4 drives, chipset uplink capped     same, naive rollback (2 state copies)         148   54.8   6.84       283,795      283,795
-   64 +2 Gen4 drives, chipset uplink capped  5.3 + 5.1 + 5.5 fp8 state (ASSUMED)              488   54.8  22.57       856,664      856,664
+   64 +2 Gen4 drives, chipset uplink capped  5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)     488   54.8  20.67       792,714      792,714
 
 5.2 INPUT-TOKEN ASYMMETRY — 64 GB + 1 drive, lean RAM, no speculation; job shape varies
    prompt/decode streams out tok/night  in tok/night hosted-equiv $/night

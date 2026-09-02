@@ -118,20 +118,33 @@ now needs speculation *and* one of: a second added drive (+$130, $610 total), fp
 (assumed), or io_uring recovering the drives' spec speed on Linux (plausible, unmeasured).
 Regenerate with `python -m sisyphus.results`; the tables live in RESULTS.md.
 
-**5.1 MEASURED (2026-09-01, first pass, weak sample):** `tools/acceptance_test.py` with
-Moonlight-16B-A3B-Instruct (same 163,840 vocab) teacher-forced against hosted K3's greedy
-output: **acceptance 0.27, 1.39 tokens per sweep at k=4** — not the assumed 0.70 / 2.77.
-Caveats: only 2 distinct prompts produced K3 output (3 of 5 samples returned empty content
-because K3 reasons before answering and `max_tokens=256` was consumed by reasoning — fixed
-in the script with `reasoning: exclude`); both surviving prompts were open-ended (code audit,
-concept explanation), the hardest case for a draft. Consequence if it holds: speculation ≈
-sparse sweep (214K vs 216K at 64 GB + 1 drive) and the two are mutually exclusive, so
-**speculation drops from primary lever to optional**. The revised path to 500K on this rig:
-sparse sweep + fp8 state (333K at +1 drive; ~430K at +2 drives) plus io_uring recovering
-drive spec speed — or a better draft (Kimi Linear 48B-A3B, same tokenizer, newer) measured
-on real extraction-shaped prompts, where acceptance is structurally higher (outputs copy
-inputs). Re-run with `--prompts` on real jobs before deciding; the script now reports top-3 /
-top-8 containment as the ceiling a better draft could reach.
+**5.1 MEASURED (2026-09-01, `tools/acceptance_test.py`, Moonlight-16B-A3B-Instruct as the
+same-tokenizer draft, teacher-forced against hosted K3's greedy output):**
+
+| prompt set | prompts | tokens | acceptance | tokens/sweep k=4 (empirical) | K3 token in draft top-3 / top-8 |
+|---|---|---|---|---|---|
+| 2 open-ended (code audit, concept explanation) | 2 | 3,940 | 0.27 | 1.39 | — |
+| **50 job-shaped** (denial/invoice/audit/scoring/transcript, `tools/make_prompts.py`) | 38 | 4,430 | **0.56** | **2.32** | 0.71 / 0.80 |
+
+The plan assumed 0.70 / 2.77. On the jobs the night would actually run, speculation is
+**84% of the assumed strength**, and matches are positively correlated (2.32 empirical vs 2.05
+from the flat-rate formula). The top-3/top-8 ceiling (0.71/0.80) says a better-calibrated
+draft (Kimi Linear 48B-A3B, same tokenizer) or multi-candidate verification could approach
+the original 0.70. Open-ended generation is a different regime (0.27) — keep speculation for
+job-shaped work. 12 of 50 prompts returned empty K3 output even with reasoning excluded
+(likely max_tokens on JSON-only answers with hidden reasoning); the script counts only
+non-empty targets.
+
+**Stack with the MEASURED acceptance** (64 GB, 256/256, 85% overlap):
+
+| lever stack | +1 drive ($480) | +2 drives ($610) |
+|---|---|---|
+| lean + sparse (no speculation) | 216K | 283K |
+| lean + speculation k=4 @ 2.32 tok/sweep | **356K** | **463K** |
+| lean + speculation + fp8 state (assumed) | 617K | 793K |
+
+500K on the $480 build now needs speculation plus fp8 *or* the second drive plus a better
+draft; on the $610 build speculation alone is within 8% of it. Input-token path unchanged.
 
 ## 6. Earlier findings that still stand (SIM)
 

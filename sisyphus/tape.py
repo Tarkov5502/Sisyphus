@@ -62,12 +62,17 @@ class TapeOptions:
     sparse: bool = False
     hot_frac: float = 0.10
     hot_mass: float = 0.75
+    tokens_per_sweep_measured: float = 0.0   # >0: use an empirically measured value instead
 
     @property
     def tokens_per_stream_step(self) -> float:
         """Expected tokens per stream per sweep: the verifier's own token plus the
         accepted draft prefix, 1 + a + a^2 + ... + a^(k-1) for k-1 drafts beyond the first
-        (a draft is kept only if every earlier draft was)."""
+        (a draft is kept only if every earlier draft was). Matches are positively
+        correlated in practice, so a measured run-length mean beats the geometric formula
+        when one is available (tools/acceptance_test.py reports it)."""
+        if self.tokens_per_sweep_measured > 0 and self.spec_k > 1:
+            return self.tokens_per_sweep_measured
         drafts = self.spec_k - 1
         return 1.0 + sum(self.accept ** i for i in range(1, drafts + 1))
 
@@ -242,9 +247,10 @@ def rig_levers_table(prompt: int = 256, decode: int = 256, overlap: float = 0.85
         ("plain tape",                                   TapeOptions()),
         ("+ 5.3 lean RAM + 6 GB VRAM for states",       TapeOptions(lean_ram=True, vram_state_gb=6.0)),
         ("+ 5.4 sparse sweep (no speculation)",         TapeOptions(lean_ram=True, vram_state_gb=6.0, sparse=True)),
-        ("5.3 + 5.1 replayable speculation k=4 @70%",   TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4)),
+        ("5.3 + 5.1 speculation k=4, MEASURED 2.32 tok/sweep", TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4, accept=0.559, tokens_per_sweep_measured=2.32)),
+        ("   same, assumed 70% (2.77 tok/sweep)",         TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4)),
         ("   same, naive rollback (2 state copies)",     TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4, replay=False)),
-        ("5.3 + 5.1 + 5.5 fp8 state (ASSUMED)",         TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4, state_bytes=1)),
+        ("5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)", TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4, accept=0.559, tokens_per_sweep_measured=2.32, state_bytes=1)),
     ]
     out = [f"THE RIG — K3 tape regime, 3070 Ti streaming, {prompt}/{decode} jobs, overlap {overlap:.0%}, "
            f"measured geometry (217 MB KDA state/stream)",
