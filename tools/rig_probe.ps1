@@ -1,4 +1,4 @@
-# tools\rig_probe.ps1 — measure the rig instead of assuming it. ~3-5 minutes. Read-only.
+# tools\rig_probe.ps1 - measure the rig instead of assuming it. ~3-5 minutes. Read-only.
 #     powershell -ExecutionPolicy Bypass -File tools\rig_probe.ps1
 # Writes rig_probe.json into the repo root for Claude to fold into geometry.py.
 param([string]$ModelDir = "D:\models\Kimi-K3-GGUF\UD-Q2_K_XL", [int]$ReadGB = 20)
@@ -45,10 +45,10 @@ dt = time.perf_counter() - t0
 print(f"{total/1e9:.1f} GB in {dt:.1f} s -> {total/dt/1e9:.2f} GB/s average, {best:.2f} GB/s best 2-GB window")
 "@
 $tmp = Join-Path $env:TEMP "seqread.py"; Set-Content $tmp $py -Encoding UTF8
-# D: — read a shard (cold: pick the one least likely cached)
+# D: - read a shard (cold: pick the one least likely cached)
 $shard = Get-ChildItem "$ModelDir\*00007-of-*.gguf" | Select -First 1
 if ($shard) { Write-Host "  D: ($($shard.Name)):"; $r = python $tmp $shard.FullName $ReadGB; Write-Host "    $r"; $out.seq_read_D = "$r" }
-# C: — need a big file; use the largest file found under C:\ common spots, else the pagefile is off-limits: create a temp 20 GB file once
+# C: - need a big file; use the largest file found under C:\ common spots, else the pagefile is off-limits: create a temp 20 GB file once
 $big = Get-ChildItem C:\Users\$env:USERNAME\Downloads, C:\Windows\Installer -Recurse -File -EA SilentlyContinue | Sort-Object Length -Descending | Select -First 1
 if ($big -and $big.Length -gt 4GB) { $target = $big.FullName } else {
     $target = "C:\seqread_test.bin"
@@ -61,4 +61,4 @@ $cpu = Get-CimInstance Win32_Processor | Select Name, NumberOfCores, NumberOfLog
 $out.cpu = "$($cpu.Name) $($cpu.NumberOfCores)C/$($cpu.NumberOfLogicalProcessors)T @ $($cpu.MaxClockSpeed) MHz"; Write-Host "  $($out.cpu)"
 
 $out | ConvertTo-Json -Depth 3 | Set-Content (Join-Path $repo "rig_probe.json") -Encoding UTF8
-Write-Host "`nwrote $repo\rig_probe.json — tell Claude it's there."
+Write-Host "`nwrote $repo\rig_probe.json - tell Claude it's there."

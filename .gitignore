@@ -4,3 +4,7 @@ __pycache__/
 *.jsonl
 *.jsonl.gz
 profile.json
+rig_probe.json
+k3_targets_cache.json
+acceptance_results.json
+k3_geometry.json

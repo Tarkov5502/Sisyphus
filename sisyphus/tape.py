@@ -227,8 +227,12 @@ def tape_table(context_tokens: int = 1024) -> str:
 #  The operator's rig: i7-12700KF, Z690-A, RTX 3070 Ti (Gen4 x16), 990 PRO + SN570
 # --------------------------------------------------------------------------- #
 RIG_GPU = ComputeModel("3070ti-x16", trunk_on_gpu=True, experts_on_gpu=True,
-                       pcie_gbps=22.0, gpu_tflops=40.0)
-RIG_DRIVES = {"as-is (990 PRO + SN570)": 10.9, "+1 Gen4 drive, split by bandwidth": 17.9}
+                       pcie_gbps=22.0, gpu_tflops=40.0)      # PCIe 4.0 x16 confirmed by nvidia-smi
+# MEASURED 2026-09-01 with winsat (sequential 64 KB, unbuffered): 990 PRO 5.55 GB/s, SN570 3.0 GB/s.
+# A new Gen4 drive is assumed to match the 990 PRO's measured class (5.5), not its spec sheet.
+RIG_DRIVES = {"as-is, measured (990 PRO 5.55 + SN570 3.0)": 8.5,
+              "+1 Gen4 drive (5.5), split by bandwidth": 14.0,
+              "+2 Gen4 drives, chipset uplink capped": 18.5}
 
 
 def rig_levers_table(prompt: int = 256, decode: int = 256, overlap: float = 0.85) -> str:

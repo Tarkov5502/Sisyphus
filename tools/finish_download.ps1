@@ -1,4 +1,4 @@
-# tools\finish_download.ps1 — detect which Kimi-K3 shards are missing, fetch exactly those,
+# tools\finish_download.ps1 - detect which Kimi-K3 shards are missing, fetch exactly those,
 # resuming partials, then verify every shard's header and the total size.
 #     powershell -ExecutionPolicy Bypass -File tools\finish_download.ps1
 param([string]$Dest = "D:\models\Kimi-K3-GGUF", [string]$Repo = "unsloth/Kimi-K3-GGUF",

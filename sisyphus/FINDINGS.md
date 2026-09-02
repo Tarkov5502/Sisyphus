@@ -18,26 +18,28 @@ dated web source), or ASSUMED (not yet measured).*
 | expert latent dim | 3584 | `expert_latent_length`; V2/V3 misread this as an MLA latent |
 | MLA KV per token | 576 fp16 values per MLA block → **0.028 MB/token** | `kv_lora_rank 512 + rope 64` |
 | **KDA state per stream** | 69 × 96 heads × 128 × 128 × 2 B → **217 MB (bf16)** | constant in context; the binding memory bound |
-| expert size | **9.69 MB** (IQ2_XS gate/up, IQ2_XS or IQ3_XXS down) | exact, from tensor offsets across all 19 shards |
-| trunk | **62.2 GB** | attention 38.6 (KDA block 474 MB, MLA block 232 MB), shared experts 12.9, latent proj 8.2, embed 2.5 |
-| model total | **861.3 GB**, 19 shards, 2,573 tensors | **complete 2026-09-01** on D: (the SN570 1 TB, not the 990 PRO); 245 GB of stale partials deleted first; ~120 GB free |
+| expert size | **9.68 MB** (IQ2_XS gate/up, IQ2_XS or IQ3_XXS down) | from tensor offsets |
+| trunk | **62 GB** | KDA block 474 MB, MLA block 232 MB, shared experts 11 GB, latent proj 7 GB, embed 2.5 GB |
+| model total | **860 GB**, 19 shards | 16 present (739 GB) on D: (the SN570 1 TB, not the 990 PRO); shards 16/18/19 missing; 245 GB of stale partials deleted 2026-09-01, 238 GB free |
 | work per token | ~208 GFLOP (CALC: 104B active × 2) | ~92 experts, ~116 trunk (of which KDA attention is large) |
 
 ## 2. The rig (RIG)
 
 i7-12700KF (8P+4E, no AVX-512) · MSI PRO Z690-A WIFI (4 DIMM, 2 free; M.2: M2_1 CPU Gen4,
 M2_2 chipset Gen4, M2_3 chipset Gen3, M2_4 chipset Gen4; chipset uplink ~13 GB/s achievable)
-· 2×16 GB DDR5-4800 · RTX 3070 Ti 8 GB on PCIe 4.0 x16 (~22 GB/s, ~40 TFLOPS effective)
-· Samsung 990 PRO 4 TB (Gen4 ~7.4 GB/s) + WD SN570 1 TB (Gen3 ~3.5 GB/s) · Windows (dev);
-production must be native Linux.
+· 2×16 GB DDR5-4800 (confirmed) · RTX 3070 Ti 8 GB, **PCIe 4.0 x16 confirmed** (nvidia-smi link
+4/4, width 16/16; ~22 GB/s, ~40 TFLOPS effective) · Samsung 990 PRO 4 TB = **C:** (1,008 GB free),
+**measured 5.55 GB/s** sequential (winsat, 2026-09-01; spec 7.4) · WD SN570 1 TB = **D:**, holds the
+model, **measured 3.0 GB/s** · Windows (dev); production must be native Linux (io_uring QD32 should
+recover some of the gap to spec).
 
 ## 3. The bounds (CALC)
 
 For a target of T tokens/night with lockstep batch B and sweep time s:
 
-- **SSD:** tape regime reads the whole model per step: `s ≥ 860 GB / bandwidth`. As-is ~11
-  GB/s → 78 s; +1 Gen4 drive with the model split by bandwidth ~18 GB/s → 48 s; ×1/0.85 for
-  realistic overlap.
+- **SSD:** tape regime reads the whole model per step: `s ≥ 861 GB / bandwidth`. As-is
+  **measured 8.5 GB/s** → 101 s; +1 Gen4 drive split by bandwidth ~14 GB/s → 62 s; +2 drives
+  ~18.5 GB/s (chipset uplink cap) → 47 s; ×1/0.85 for realistic overlap.
 - **Per-stream memory:** `B ≤ (RAM − OS − buffers) / (217 MB + ctx × 0.028 MB)`. 32 GB →
   ~77; 64 GB → ~219; 128 GB → ~500; 192 GB → ~760. **This is the wall.**
 - **Compute:** GPU FLOPs ≈ 40 TFLOPS → 190 tokens/s ceiling for *any* token; irrelevant for
@@ -95,20 +97,25 @@ agreement >99% and perplexity <1% delta to pass.
 **5.6 Lower-precision tail experts.** Re-quantize cold experts IQ2_XS → IQ1_S/M: sweep
 bytes ~−30%. Quality cost unmeasured; needs the routing profile to choose hot vs cold.
 
-**Stack, modelled (`sisyphus.tape.rig_levers_table`, 64 GB + 1 drive, 256/256 jobs, 85%
-overlap; acceptance per sweep is geometric, 1 + a + a² + a³ = 2.77 at a=0.7, k=4):**
+**Stack, modelled (`sisyphus.tape.rig_levers_table`, MEASURED drive speeds, 64 GB, 256/256
+jobs, 85% overlap; acceptance per sweep is geometric, 1 + a + a² + a³ = 2.77 at a=0.7, k=4):**
 
-| lever stack | streams | tok/s | out tokens/night |
-|---|---|---|---|
-| plain tape | 219 | 4.0 | 167K |
-| + 5.3 lean RAM + 6 GB VRAM for states | 294 | 5.3 | 222K |
-| + 5.4 sparse sweep (no speculation) | 294 | 6.9 | 284K |
-| 5.3 + 5.1 replayable speculation (k=4, 70%) | 278 | 12.7 | **510K** |
-| same with naive rollback (2 state copies) | 151 | 6.9 | 287K |
-| 5.3 + 5.1 + 5.5 fp8 state (ASSUMED) | 499 | 22.9 | 866K |
+| lever stack | +1 drive (~14 GB/s, $480 total) | +2 drives (~18.5 GB/s, $610) |
+|---|---|---|
+| plain tape | 125K | 164K |
+| + 5.3 lean RAM + 6 GB VRAM for states | 167K | 219K |
+| + 5.4 sparse sweep (no speculation) | 216K | 283K |
+| 5.3 + 5.1 replayable speculation (k=4, 70%) | **387K** | **503K** |
+| same with naive rollback (2 state copies) | 217K | 284K |
+| 5.3 + 5.1 + 5.5 fp8 state (ASSUMED) | 668K | 857K |
 
-At 32 GB (no RAM purchase) the same stack reaches 332K with speculation, 576K with fp8.
-Input tokens (5.2), same build, 2048/8 jobs: ~6.2 M/night (~$19/night hosted-equivalent).
+Drives as-is (8.5 GB/s measured): plain 76K, speculation 240K, + fp8 421K. At 32 GB the
+whole column is ~half. Input tokens (5.2), 64 GB + 1 drive, 2048/8 jobs: ~6.1 M/night.
+
+**What the measured drives changed (2026-09-01):** the 990 PRO benches at 5.55 GB/s, not the
+7.4 spec, so every sweep is ~30% slower than the first estimate. On the $480 build, 500K
+now needs speculation *and* one of: a second added drive (+$130, $610 total), fp8 state
+(assumed), or io_uring recovering the drives' spec speed on Linux (plausible, unmeasured).
 Regenerate with `python -m sisyphus.results`; the tables live in RESULTS.md.
 
 ## 6. Earlier findings that still stand (SIM)
@@ -141,11 +148,12 @@ Gen4 NVMe 1 TB ~$130, Gen5 2 TB ~$400 · RTX 3090 used ~$1,300, 4090 used ~$2,50
 
 ## 9. Order of operations
 
-0. ~~Delete stale partials, finish shards 16/18/19~~ **done 2026-09-01** — all 19 shards, 861.3 GB,
-   headers verified (`tools\finish_download.ps1`). Still to do: split the model across the 990 PRO
-   (C:) and the SN570 (D:) by bandwidth — today it sits entirely on the Gen3 drive. **$0.**
-1. Buy 2×16 GB DDR5 (~$350) → 64 GB. Buy one Gen4 1 TB NVMe (~$130) for M2_2; split the
-   model across the three drives by bandwidth. **~$480.**
+0. ~~Delete stale partials~~ done (245 GB freed). Finish shards 16, 18, 19:
+   `tools\finish_download.ps1`. Then move/split the model onto the 990 PRO (C:) — today it
+   sits entirely on the Gen3 SN570. **$0.**
+1. Buy 2×16 GB DDR5-4800 (~$350) → 64 GB. Buy one Gen4 1 TB NVMe (~$130) for M2_2 (a second
+   for M2_4 later, +$130, is what carries 500K without fp8). Split the model across the drives
+   by measured bandwidth: 990 PRO 5.55 : new 5.5 : SN570 3.0. C: has 1,008 GB free. **~$480.**
 2. Test 5.5 on Kimi Linear 48B locally (fp8 vs bf16 state agreement). **$0.**
 3. Engine: tape-mode GPU streaming (expert chunks SSD→RAM ring→VRAM, all-stream hidden
    states in VRAM, KDA states in RAM/VRAM, MLA KV in RAM), then 5.3, then 5.4 or 5.1.

@@ -1,4 +1,4 @@
-# tools\k3_geometry.ps1 — find the Kimi-K3 GGUF shards on any local drive, read their
+# tools\k3_geometry.ps1 - find the Kimi-K3 GGUF shards on any local drive, read their
 # headers, and write C:\dev\sisyphus-src\k3_geometry.json.  Run from the repo root:
 #     powershell -ExecutionPolicy Bypass -File tools\k3_geometry.ps1
 param([string]$Path = "")
