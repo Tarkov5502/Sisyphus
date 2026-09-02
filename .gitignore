@@ -10,3 +10,6 @@ acceptance_results.json
 k3_geometry.json
 rig_diskspd.json
 tools/diskspd/
+tools/llama.cpp/
+first_token.log
+first_token.json
