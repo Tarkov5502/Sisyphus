@@ -13,3 +13,8 @@ tools/diskspd/
 tools/llama.cpp/
 first_token.log
 first_token.json
+linux_prep.json
+rig_fio.json
+first_token_linux.log
+first_token_linux.json
+.venv/
