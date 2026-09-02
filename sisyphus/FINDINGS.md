@@ -63,7 +63,7 @@ Within $500 the plain K3 ceiling is ~170K/night. 500K plain needs ~145 GB free f
 
 ## 5. The levers against the state wall (CALC unless noted)
 
-**5.1 Replayable speculative decoding.** In tape mode the sweep already touches every
+**5.1 Replayable speculative decoding (see MEASURED note below).** In tape mode the sweep already touches every
 expert, so verifying k drafted tokens per stream per sweep multiplies tokens per sweep by
 `1 + a + a² + … + a^(k−1)` (2.77 at a=0.7, k=4) at no SSD cost; GPU has the FLOPs (219 × 4 × 208 GFLOP ≈ 5 s per
 sweep). Rollback of the KDA state on rejection does NOT need a second state copy: the update
@@ -117,6 +117,21 @@ whole column is ~half. Input tokens (5.2), 64 GB + 1 drive, 2048/8 jobs: ~6.1 M/
 now needs speculation *and* one of: a second added drive (+$130, $610 total), fp8 state
 (assumed), or io_uring recovering the drives' spec speed on Linux (plausible, unmeasured).
 Regenerate with `python -m sisyphus.results`; the tables live in RESULTS.md.
+
+**5.1 MEASURED (2026-09-01, first pass, weak sample):** `tools/acceptance_test.py` with
+Moonlight-16B-A3B-Instruct (same 163,840 vocab) teacher-forced against hosted K3's greedy
+output: **acceptance 0.27, 1.39 tokens per sweep at k=4** — not the assumed 0.70 / 2.77.
+Caveats: only 2 distinct prompts produced K3 output (3 of 5 samples returned empty content
+because K3 reasons before answering and `max_tokens=256` was consumed by reasoning — fixed
+in the script with `reasoning: exclude`); both surviving prompts were open-ended (code audit,
+concept explanation), the hardest case for a draft. Consequence if it holds: speculation ≈
+sparse sweep (214K vs 216K at 64 GB + 1 drive) and the two are mutually exclusive, so
+**speculation drops from primary lever to optional**. The revised path to 500K on this rig:
+sparse sweep + fp8 state (333K at +1 drive; ~430K at +2 drives) plus io_uring recovering
+drive spec speed — or a better draft (Kimi Linear 48B-A3B, same tokenizer, newer) measured
+on real extraction-shaped prompts, where acceptance is structurally higher (outputs copy
+inputs). Re-run with `--prompts` on real jobs before deciding; the script now reports top-3 /
+top-8 containment as the ceiling a better draft could reach.
 
 ## 6. Earlier findings that still stand (SIM)
 
