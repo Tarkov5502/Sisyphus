@@ -172,6 +172,64 @@ Linux, but 990 PRO 4 TB throttling under sustained *reads* is not a known proble
 replaces the winsat 8.5 GB/s everywhere; the buffered 4.48 GB/s stands as the cost of doing
 I/O the wrong way.
 
+### 5.x Second design pass (2026-09-03): traversal distance
+
+Distance per token = `bytes per sweep / (streams x tokens per sweep)`. Everything below moves one of
+the three terms. Labels: KNOWN = established technique applied here; NEW = not found elsewhere;
+ASSUMED = plausible, unmeasured; the test that settles each is named.
+
+**5.7 Tree verification (KNOWN: Medusa/EAGLE/SpecInfer; tokens per sweep).** Verify several draft
+branches per position instead of one chain. Effective acceptance becomes the top-k rate we already
+measured (top-3 0.71, top-8 0.80) instead of top-1 0.56: ~2.6-3.0 tokens/sweep at k=4-6 vs 2.32.
+Costs compute the sweep is not using (budget at 60 s sweep, 40 TFLOPS: ~11K verify tokens per sweep,
+i.e. ~40 per stream at 270 streams; tighter at 1,000+ streams). Compatible with the KDA state because
+branch outputs are computed from the starting state with the chunked delta-rule (no per-branch state
+copy); the accepted path is then replayed as in 5.1. +12-30% on every row.
+
+**5.8 Low-rank KDA state (NEW here; ASSUMED).** Per head the state is a 128x128 matrix built by
+gated rank-1 updates with decay; old directions are damped every step, so its effective rank is
+plausibly far below 128. Store each head's state as a rank-r factorization (r=32: 4x smaller than
+bf16 full; with fp8 factors 8x), re-expand on the GPU before the step, re-truncate after
+(SVD/power-iteration on 128x128 per head: ~1e12 FLOP per step across all streams, ~25 ms). Because
+tokens/night scale linearly with streams until the drives bind, this is the largest single lever
+left: **64 GB + 1 drive, measured speculation: bf16 428K -> fp8 735K -> 4x 1.14M -> 8x 1.58M**
+(drives as-is: 272K -> 475K -> 756K -> 1.07M). Test: same harness as 5.5 on Kimi Linear 48B-A3B --
+bf16 state vs rank-32/64 (and fp8 factors) over 256-token generations; pass = token agreement
+>99%, perplexity delta <1%. If the state is not low-rank the test says so in an afternoon.
+
+**5.9 Shared-prefix state forking (KNOWN: prefix caching; input tokens).** Jobs of one type share
+their instructions; the KDA state and MLA KV after the shared prefix are identical for every
+stream, so compute them once and fork. Prefill compute (the binding term for input tokens) drops
+by the shared fraction: at 1,500 shared of 2,048 tokens, ~4x more unique input per night. No
+effect on sweep bytes or state memory (each stream diverges and needs its own state afterwards).
+
+**5.10 Lossless entropy coding of expert blocks (KNOWN: DFloat11-style; bytes).** IQ2_XS/IQ3_XXS
+blocks are codebook indices plus scales; rANS-coding them buys an estimated 3-8% fewer bytes per
+sweep, decoded on the GPU at far above stream rate. Small, free of quality risk, last priority.
+
+**5.11 Whole-model IQ1_S as a measured trade (bytes; the 5.6 question at model scale).** The
+UD-IQ1_S image is 594 GB (-31% sweep bytes, so 1.45x on every SSD-bound row). Community reports
+degradation; we can measure it on OUR jobs for free: the hosted-K3 greedy targets already cached
+by `tools/acceptance_test.py` are a quality oracle -- teacher-force the local Q2_K_XL and IQ1_S
+models on the same targets (one prefill sweep per prompt, ~5-10 min each via llama.cpp mmap, an
+overnight job) and compare agreement with hosted K3. If IQ1_S agrees within a point or two of
+Q2_K_XL, the cheaper tape wins outright. Requires a second 594 GB download (D: cannot hold both;
+C:'s ext4 share can).
+
+**Things that look like levers and are not (checked this pass).** Trunk residency: the 62 GB trunk
+is 7% of the sweep, but every GB kept in RAM displaces ~4.6 streams (1.7% of throughput) to save
+0.12% of bytes -- stream it. State recompute from token history: the state IS a function of the
+tokens, but recomputing 290 streams x 300 tokens per step is ~450 s of prefill against an 82 s
+sweep. Hot-expert VRAM cache: 4-5 GB of idle VRAM holds ~0.5% of expert bytes; routing skew at
+batch 270 is too flat for it to matter (rent-to-profile harness would confirm). Cross-step expert
+reuse: the RAM is the state wall; there is no room for an expert cache, by construction.
+
+**Combined ceiling if 5.5 + 5.8 hold at 8x (ASSUMED) with 5.7 (3.0 tok/sweep), 64 GB:** drives
+as-is ~1.2M/night, +1 drive ~1.76M, +2 drives ~1.98M -- at which point the GPU's PCIe link
+(22 GB/s) and compute (~1 PFLOP of verification per sweep) are within 2x of binding and the state
+wall stops being the story. Every one of those numbers depends on two experiments on a 48B model
+that need the RAM to arrive.
+
 ## 6. Earlier findings that still stand (SIM)
 
 - 84% of scheduler-regime bytes are single-use cold experts; only skip/substitute/tape
