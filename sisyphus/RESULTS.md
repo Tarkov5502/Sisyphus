@@ -136,6 +136,8 @@ THE RIG — K3 tape regime, 3070 Ti streaming, 256/256 jobs, overlap 85%, measur
    32 as-is, measured (990 PRO 7.07 + SN570 3.47)    same, assumed 70% (2.77 tok/sweep)            140   96.0   3.69       155,979      155,979
    32 as-is, measured (990 PRO 7.07 + SN570 3.47)    same, naive rollback (2 state copies)          76   96.0   2.00        85,538       85,538
    32 as-is, measured (990 PRO 7.07 + SN570 3.47) 5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)     253   96.0   6.11       254,490      254,490
+   32 as-is, measured (990 PRO 7.07 + SN570 3.47)    + 5.8 low-rank r=32 fp8 state, 4x (ASSUMED)     420   96.0  10.15       412,657      412,657
+   32 as-is, measured (990 PRO 7.07 + SN570 3.47)    + 5.8 r=16 fp8, 8x + 5.7 tree 3.0 tok/sweep (ASSUMED)     559   96.0  17.46       681,491      681,491
 
    32 +1 Gen4 drive (6.5), split by bandwidth plain tape                                        74   59.6   1.24        53,229       53,229
    32 +1 Gen4 drive (6.5), split by bandwidth + 5.3 lean RAM + 6 GB VRAM for states            149   59.6   2.50       106,364      106,364
@@ -144,6 +146,8 @@ THE RIG — K3 tape regime, 3070 Ti streaming, 256/256 jobs, overlap 85%, measur
    32 +1 Gen4 drive (6.5), split by bandwidth    same, assumed 70% (2.77 tok/sweep)            140   59.6   5.95       247,991      247,991
    32 +1 Gen4 drive (6.5), split by bandwidth    same, naive rollback (2 state copies)          76   59.6   3.23       136,820      136,820
    32 +1 Gen4 drive (6.5), split by bandwidth 5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)     253   59.6   9.85       401,238      401,238
+   32 +1 Gen4 drive (6.5), split by bandwidth    + 5.8 low-rank r=32 fp8 state, 4x (ASSUMED)     420   59.6  16.35       642,008      642,008
+   32 +1 Gen4 drive (6.5), split by bandwidth    + 5.8 r=16 fp8, 8x + 5.7 tree 3.0 tok/sweep (ASSUMED)     559   59.6  28.14     1,036,955    1,036,955
 
    32 +2 Gen4 drives, chipset uplink capped ~13 plain tape                                        74   50.7   1.46        62,539       62,539
    32 +2 Gen4 drives, chipset uplink capped ~13 + 5.3 lean RAM + 6 GB VRAM for states            149   50.7   2.94       124,802      124,802
@@ -152,6 +156,8 @@ THE RIG — K3 tape regime, 3070 Ti streaming, 256/256 jobs, overlap 85%, measur
    32 +2 Gen4 drives, chipset uplink capped ~13    same, assumed 70% (2.77 tok/sweep)            140   50.7   7.00       289,957      289,957
    32 +2 Gen4 drives, chipset uplink capped ~13    same, naive rollback (2 state copies)          76   50.7   3.80       160,417      160,417
    32 +2 Gen4 drives, chipset uplink capped ~13 5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)     253   50.7  11.59       467,359      467,359
+   32 +2 Gen4 drives, chipset uplink capped ~13    + 5.8 low-rank r=32 fp8 state, 4x (ASSUMED)     420   50.7  19.23       743,377      743,377
+   32 +2 Gen4 drives, chipset uplink capped ~13    + 5.8 r=16 fp8, 8x + 5.7 tree 3.0 tok/sweep (ASSUMED)     559   50.7  33.10     1,189,132    1,189,132
 
    64 as-is, measured (990 PRO 7.07 + SN570 3.47) plain tape                                       213   96.0   2.22        94,521       94,521
    64 as-is, measured (990 PRO 7.07 + SN570 3.47) + 5.3 lean RAM + 6 GB VRAM for states            287   96.0   2.99       126,770      126,770
@@ -160,6 +166,8 @@ THE RIG — K3 tape regime, 3070 Ti streaming, 256/256 jobs, overlap 85%, measur
    64 as-is, measured (990 PRO 7.07 + SN570 3.47)    same, assumed 70% (2.77 tok/sweep)            271   96.0   7.15       295,816      295,816
    64 as-is, measured (990 PRO 7.07 + SN570 3.47)    same, naive rollback (2 state copies)         148   96.0   3.90       164,684      164,684
    64 as-is, measured (990 PRO 7.07 + SN570 3.47) 5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)     488   96.0  11.79       474,974      474,974
+   64 as-is, measured (990 PRO 7.07 + SN570 3.47)    + 5.8 low-rank r=32 fp8 state, 4x (ASSUMED)     811   96.0  19.59       755,709      755,709
+   64 as-is, measured (990 PRO 7.07 + SN570 3.47)    + 5.8 r=16 fp8, 8x + 5.7 tree 3.0 tok/sweep (ASSUMED)    1078   96.0  33.67     1,206,145    1,206,145
 
    64 +1 Gen4 drive (6.5), split by bandwidth plain tape                                       213   59.6   3.57       151,073      151,073
    64 +1 Gen4 drive (6.5), split by bandwidth + 5.3 lean RAM + 6 GB VRAM for states            287   59.6   4.82       202,057      202,057
@@ -168,6 +176,8 @@ THE RIG — K3 tape regime, 3070 Ti streaming, 256/256 jobs, overlap 85%, measur
    64 +1 Gen4 drive (6.5), split by bandwidth    same, assumed 70% (2.77 tok/sweep)            271   59.6  11.52       464,768      464,768
    64 +1 Gen4 drive (6.5), split by bandwidth    same, naive rollback (2 state copies)         148   59.6   6.29       261,637      261,637
    64 +1 Gen4 drive (6.5), split by bandwidth 5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)     488   59.6  18.99       735,131      735,131
+   64 +1 Gen4 drive (6.5), split by bandwidth    + 5.8 low-rank r=32 fp8 state, 4x (ASSUMED)     811   59.6  31.57     1,142,949    1,142,949
+   64 +1 Gen4 drive (6.5), split by bandwidth    + 5.8 r=16 fp8, 8x + 5.7 tree 3.0 tok/sweep (ASSUMED)    1078   59.6  54.26     1,759,785    1,759,785
 
    64 +2 Gen4 drives, chipset uplink capped ~13 plain tape                                       213   50.7   4.20       177,064      177,064
    64 +2 Gen4 drives, chipset uplink capped ~13 + 5.3 lean RAM + 6 GB VRAM for states            287   50.7   5.66       236,519      236,519
@@ -176,6 +186,8 @@ THE RIG — K3 tape regime, 3070 Ti streaming, 256/256 jobs, overlap 85%, measur
    64 +2 Gen4 drives, chipset uplink capped ~13    same, assumed 70% (2.77 tok/sweep)            271   50.7  13.55       540,508      540,508
    64 +2 Gen4 drives, chipset uplink capped ~13    same, naive rollback (2 state copies)         148   50.7   7.40       305,809      305,809
    64 +2 Gen4 drives, chipset uplink capped ~13 5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)     488   50.7  22.35       849,258      849,258
+   64 +2 Gen4 drives, chipset uplink capped ~13    + 5.8 low-rank r=32 fp8 state, 4x (ASSUMED)     811   50.7  37.14     1,307,306    1,307,306
+   64 +2 Gen4 drives, chipset uplink capped ~13    + 5.8 r=16 fp8, 8x + 5.7 tree 3.0 tok/sweep (ASSUMED)    1078   50.7  63.83     1,983,122    1,983,122
 
 5.2 INPUT-TOKEN ASYMMETRY — 64 GB + 1 drive, lean RAM, no speculation; job shape varies
    prompt/decode streams out tok/night  in tok/night hosted-equiv $/night

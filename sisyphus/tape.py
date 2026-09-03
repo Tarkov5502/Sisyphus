@@ -45,7 +45,8 @@ class TapeOptions:
 
     lean_ram      5.3: lean OS reserve (2 GB) and a 1.5 GB expert ring instead of 8.5 GB
     vram_state_gb 5.3: idle VRAM used to hold stream states (0 = none)
-    state_bytes   5.5: 2 = bf16 state (default), 1 = fp8 state storage (ASSUMED to hold)
+    state_bytes   5.5/5.8: 2 = bf16 state (default), 1 = fp8, 0.5 = fp8 rank-32 factors,
+                  0.25 = fp8 rank-16 factors (compressed states are ASSUMED until measured)
     spec_k        5.1: drafted tokens verified per stream per sweep (1 = no speculation)
     accept        5.1: per-draft acceptance probability (ASSUMED 0.7 until measured)
     replay        5.1: True = replayable rollback (store update vectors, ~6% overhead);
@@ -55,7 +56,7 @@ class TapeOptions:
     """
     lean_ram: bool = False
     vram_state_gb: float = 0.0
-    state_bytes: int = 2
+    state_bytes: float = 2
     spec_k: int = 1
     accept: float = 0.7
     replay: bool = True
@@ -255,6 +256,8 @@ def rig_levers_table(prompt: int = 256, decode: int = 256, overlap: float = 0.85
         ("   same, assumed 70% (2.77 tok/sweep)",         TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4)),
         ("   same, naive rollback (2 state copies)",     TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4, replay=False)),
         ("5.3 + 5.1 (measured) + 5.5 fp8 state (ASSUMED)", TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4, accept=0.559, tokens_per_sweep_measured=2.32, state_bytes=1)),
+        ("   + 5.8 low-rank r=32 fp8 state, 4x (ASSUMED)", TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=4, accept=0.559, tokens_per_sweep_measured=2.32, state_bytes=0.5)),
+        ("   + 5.8 r=16 fp8, 8x + 5.7 tree 3.0 tok/sweep (ASSUMED)", TapeOptions(lean_ram=True, vram_state_gb=6.0, spec_k=6, accept=0.559, tokens_per_sweep_measured=3.0, state_bytes=0.25)),
     ]
     out = [f"THE RIG — K3 tape regime, 3070 Ti streaming, {prompt}/{decode} jobs, overlap {overlap:.0%}, "
            f"measured geometry (217 MB KDA state/stream)",

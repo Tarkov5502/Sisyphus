@@ -188,11 +188,12 @@ copy); the accepted path is then replayed as in 5.1. +12-30% on every row.
 
 **5.8 Low-rank KDA state (NEW here; ASSUMED).** Per head the state is a 128x128 matrix built by
 gated rank-1 updates with decay; old directions are damped every step, so its effective rank is
-plausibly far below 128. Store each head's state as a rank-r factorization (r=32: 4x smaller than
-bf16 full; with fp8 factors 8x), re-expand on the GPU before the step, re-truncate after
-(SVD/power-iteration on 128x128 per head: ~1e12 FLOP per step across all streams, ~25 ms). Because
+plausibly far below 128. Store each head's state as a rank-r factorization A*B^T (128 x r each):
+bf16 factors at r=32 halve it, fp8 factors at r=32 give 4x, fp8 at r=16 give 8x. Re-expand on the
+GPU before the step, re-truncate after (QR + small SVD per head: a few TFLOP per step across all
+streams, well under 0.1 s). ENGINE_DESIGN.md section 6c has the implementation. Because
 tokens/night scale linearly with streams until the drives bind, this is the largest single lever
-left: **64 GB + 1 drive, measured speculation: bf16 428K -> fp8 735K -> 4x 1.14M -> 8x 1.58M**
+left: **64 GB + 1 drive, measured speculation: bf16 428K -> fp8 735K -> 4x (fp8, r=32) 1.14M -> 8x (fp8, r=16) 1.58M**
 (drives as-is: 272K -> 475K -> 756K -> 1.07M). Test: same harness as 5.5 on Kimi Linear 48B-A3B --
 bf16 state vs rank-32/64 (and fp8 factors) over 256-token generations; pass = token agreement
 >99%, perplexity delta <1%. If the state is not low-rank the test says so in an afternoon.
