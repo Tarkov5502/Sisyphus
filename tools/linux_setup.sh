@@ -165,4 +165,6 @@ fi
 
 say "done"
 [ "${NEED_REBOOT:-0}" = 1 ] && echo "REBOOT now (new NVIDIA driver), then re-run: bash tools/linux_setup.sh"
+# hand the results to the Windows side (C:\dev\sisyphus-src) so the Windows-linked Claude session can read them
+[ "$WSL" = 0 ] && bash "$REPO/tools/linux_handoff.sh" || true
 echo "tell Claude: rig_fio.json and first_token_linux.json are there."
