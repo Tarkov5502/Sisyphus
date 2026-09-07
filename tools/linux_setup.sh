@@ -40,7 +40,7 @@ elif [ "$WSL" = 1 ]; then
 else
     echo "installing the recommended NVIDIA driver (ubuntu-drivers)..."
     sudo ubuntu-drivers install 2>&1 | tail -3
-    NEED_REBOOT=1
+    if [ "${PIPESTATUS[0]}" = 0 ]; then NEED_REBOOT=1; else echo "  driver install FAILED - see above"; fi
     echo "  -> driver installed; a REBOOT is needed before the GPU is usable. Re-run this script after."
 fi
 if ! command -v nvcc >/dev/null; then
@@ -55,8 +55,9 @@ say "Windows drives"
 sudo mkdir -p /mnt/win
 while read -r dev fstype label; do
     [ "$fstype" = "ntfs" ] || continue
-    name="${label:-$(basename "$dev")}"; name="${name// /_}"
-    mp="/mnt/win/$name"
+    # mount folder named by DEVICE, not NTFS label: on this rig C: and D: both carry the label "Windows"
+    # (and lsblk -r escapes spaces in labels as \x20, so labels make poor directory names anyway)
+    mp="/mnt/win/$(basename "$dev")"
     if ! mountpoint -q "$mp"; then
         sudo mkdir -p "$mp"
         sudo mount -t ntfs3 -o ro,noatime,uid=$(id -u),gid=$(id -g) "$dev" "$mp" 2>/dev/null \
@@ -108,23 +109,28 @@ EOF
     for dev in "${!FILE_FOR_DEV[@]}"; do
         echo "-- $dev alone, 60 s: ${FILE_FOR_DEV[$dev]}"
         out=$(run_fio 60 "$dev=${FILE_FOR_DEV[$dev]}")
-        if [ -z "$out" ] || ! echo "$out" | jq -e .jobs >/dev/null 2>&1; then
+        if [ -z "$out" ] || ! echo "$out" | jq -e '.jobs[0].error == 0 and .jobs[0].read.bw_bytes > 0' >/dev/null 2>&1; then
             echo "   O_DIRECT refused on this filesystem; retrying buffered (numbers then include the page cache)"
             out=$(fio --output-format=json --name="$dev" --filename="${FILE_FOR_DEV[$dev]}" --rw=read --bs=8M --iodepth=32 --numjobs=2 --ioengine=io_uring --direct=0 --time_based --runtime=60 --thread 2>/dev/null)
         fi
-        echo "$out" | summarize | sed 's/^/   /'; echo "{\"phase\":\"$dev alone\",\"fio\":$out}" >> /tmp/fio_all.json
+        if [ -n "$out" ] && echo "$out" | jq -e .jobs >/dev/null 2>&1; then
+            echo "$out" | summarize | sed 's/^/   /'; echo "{\"phase\":\"$dev alone\",\"fio\":$out}" >> /tmp/fio_all.json
+        else echo "   fio produced no usable output for $dev"; fi
     done
     if [ "${#FILE_FOR_DEV[@]}" -gt 1 ]; then
         echo "-- all drives concurrently, 180 s"
         pairs=(); for dev in "${!FILE_FOR_DEV[@]}"; do pairs+=("$dev=${FILE_FOR_DEV[$dev]}"); done
         out=$(run_fio 180 "${pairs[@]}")
-        echo "$out" | summarize | sed 's/^/   /'
-        agg=$(echo "$out" | jq '[.jobs[].read.bw_bytes] | add / 1e9')
-        printf '   aggregate %.2f GB/s -> 861 GB sweep = %.0f s\n' "$agg" "$(awk -v a="$agg" 'BEGIN{print 861/a}')"
-        echo "{\"phase\":\"concurrent\",\"fio\":$out}" >> /tmp/fio_all.json
+        if [ -n "$out" ] && echo "$out" | jq -e .jobs >/dev/null 2>&1; then
+            echo "$out" | summarize | sed 's/^/   /'
+            agg=$(echo "$out" | jq '[.jobs[].read.bw_bytes] | add / 1e9')
+            printf '   aggregate %.2f GB/s -> 861 GB sweep = %.0f s\n' "$agg" "$(awk -v a="$agg" 'BEGIN{print (a>0)?861/a:0}')"
+            echo "{\"phase\":\"concurrent\",\"fio\":$out}" >> /tmp/fio_all.json
+        else echo "   fio produced no usable output for the concurrent run"; fi
     fi
-    jq -s '{date: (now|todate), kernel: "'"$(uname -r)"'", phases: .}' /tmp/fio_all.json > "$REPO/rig_fio.json"
-    echo "wrote $REPO/rig_fio.json"
+    if [ -s /tmp/fio_all.json ]; then
+        jq -s '{date: (now|todate), kernel: "'"$(uname -r)"'", phases: .}' /tmp/fio_all.json > "$REPO/rig_fio.json" && echo "wrote $REPO/rig_fio.json"
+    else echo "no fio results to write"; fi
 fi
 [ "$ONLY_BENCH" = 1 ] && exit 0
 
@@ -148,12 +154,14 @@ if [ "$DO_TOKEN" = 1 ] && [ -n "$MODEL_DIR" ]; then
         cmake -S "$LL" -B "$LL/build" -G Ninja -DCMAKE_BUILD_TYPE=Release $CUDA_FLAG -DLLAMA_CURL=OFF >/dev/null && \
         cmake --build "$LL/build" --target llama-completion llama-cli llama-server 2>&1 | tail -1
     fi
-    BIN="$LL/build/bin/llama-completion"; EXTRA=""
-    [ -x "$BIN" ] || { BIN="$LL/build/bin/llama-cli"; EXTRA="-no-cnv"; }
+    # raw completion (-no-cnv): K3's chat template needs --jinja and we want the bare prompt anyway.
+    # -no-cnv exists only for llama-completion; the older llama-cli layout has no conversation mode to disable.
+    BIN="$LL/build/bin/llama-completion"; EXTRA="-no-cnv"
+    [ -x "$BIN" ] || { BIN="$LL/build/bin/llama-cli"; EXTRA=""; }
     say "first K3 tokens on Linux (mmap from $MODEL_DIR, batch 1 - minutes per token)"
     LOG="$REPO/first_token_linux.log"
     t0=$(date +%s)
-    "$BIN" -m "$MODEL_DIR/$MODEL_FILE" -p "The capital of France is" -n 8 -c 512 -t 16 --temp 0 --no-warmup -ngl 0 $EXTRA 2>&1 | tee "$LOG"
+    "$BIN" -m "$MODEL_DIR/$MODEL_FILE" -p "The capital of France is" -n 4 -c 512 -t 16 --temp 0 --no-warmup -ngl 0 $EXTRA 2>&1 | tee "$LOG"
     secs=$(( $(date +%s) - t0 ))
     spt=$(grep -oP 'eval time\s*=\s*[\d.]+ ms /\s*\d+ runs\s*\(\s*\K[\d.]+' "$LOG" | tail -1)
     jq -n --arg spt "${spt:-}" --arg secs "$secs" --arg dir "$MODEL_DIR" --arg k "$(uname -r)" \

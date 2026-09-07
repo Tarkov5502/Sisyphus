@@ -458,3 +458,21 @@ def test_input_tokens_scale_with_prompt_not_sweeps():
     long_ = best_tape(64, 2056, compute=RIG_GPU, seq_gbps=17.9, opts=o, prompt_tokens=2048, decode_tokens=8, overlap=0.85)
     assert long_.input_tokens_per_night > 20 * short.input_tokens_per_night
     assert long_.tokens_per_night < short.tokens_per_night
+
+
+# --------------------------------------------------------------------------- #
+#  Measured anchor: first K3 tokens on the rig (2026-09-06, FINDINGS 5b)
+# --------------------------------------------------------------------------- #
+def test_batch1_sparse_step_matches_first_token():
+    """llama.cpp at batch 1 read the trunk + its routed experts from D: (SN570, 3.5 GB/s)
+    in 26.6 s/token. The tape model's sparse cost curve must land in the same place:
+    62 GB + 799 GB x union(16 picks)/896 -> ~76 GB -> ~22 s at 3.5 GB/s. The measured
+    number is a page-fault mmap path, so allow it to be up to 40% slower than sequential."""
+    from sisyphus.tape import TapeOptions
+    from sisyphus.geometry import TRUNK_GB, MODEL_GB
+    o = TapeOptions(sparse=True)
+    gb = TRUNK_GB + (MODEL_GB - TRUNK_GB) * o.sweep_fraction(1)
+    predicted_s = gb / 3.5
+    measured_s = 26.6
+    assert 70 < gb < 90, gb
+    assert predicted_s < measured_s < predicted_s * 1.4, (predicted_s, measured_s)

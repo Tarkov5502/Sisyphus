@@ -71,13 +71,18 @@ Write-Host ""
 # ---- 3. run ----------------------------------------------------------------------------------
 $args_ = @("-m", $first.FullName, "-p", $Prompt, "-n", "$Tokens", "-c", "$Ctx", "-t", "$Threads",
            "--temp", "0", "--no-warmup", "-ngl", "0")
-if ($exe.Name -eq "llama-cli.exe") { $args_ += @("-no-cnv") }   # older layout: llama-cli is the completion tool
+if ($exe.Name -eq "llama-completion.exe") { $args_ += @("-no-cnv") }   # raw completion; the flag exists only for llama-completion
 Write-Host ("> " + $exe.Name + " " + ($args_ -join " "))
 Write-Host "(output is also captured to first_token.log)"
 Write-Host "------------------------------------------------------------------"
 $t0 = Get-Date
-& $exe.FullName @args_ 2>&1 | Tee-Object -FilePath $log
+# llama.cpp logs to stderr; with ErrorActionPreference=Stop, PowerShell 5.1 would abort on the first stderr line
+$eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+& $exe.FullName @args_ 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $log
 $code = $LASTEXITCODE
+$ErrorActionPreference = $eap
+# Tee-Object in PowerShell 5.1 writes UTF-16; rewrite the log as UTF-8 so it is greppable everywhere
+try { (Get-Content $log) | Set-Content -Path $log -Encoding UTF8 } catch {}
 $secs = [math]::Round(((Get-Date) - $t0).TotalSeconds)
 Write-Host "------------------------------------------------------------------"
 Write-Host "exit $code after $secs s"
@@ -93,7 +98,7 @@ $m = [regex]::Match($text, "\beval time\s*=\s*([\d.]+) ms\s*/\s*(\d+) runs\s*\(\
 if ($m.Success) {
     $res.eval_ms = [double]$m.Groups[1].Value; $res.eval_runs = [int]$m.Groups[2].Value
     $res.seconds_per_token = [math]::Round([double]$m.Groups[3].Value / 1000, 1)
-    $res.effective_gbps = [math]::Round($gb / $res.seconds_per_token, 2)
+    $res.effective_gbps = if ($res.seconds_per_token -gt 0) { [math]::Round($gb / $res.seconds_per_token, 2) } else { 0 }
     Write-Host ("decode: {0} s per token  ->  {1} GB/s effective model streaming (861 GB per token, batch 1, buffered mmap)" -f $res.seconds_per_token, $res.effective_gbps)
 }
 if ($text -match "unknown model architecture|unknown architecture") {
