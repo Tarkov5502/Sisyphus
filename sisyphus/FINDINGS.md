@@ -53,8 +53,10 @@ doubles everything: physics odds ~50%, and ~35% as a tier reached within a year.
 at the measured rate: ~60%.
 
 **Daytime (one thread; §5.21/5.26/5.28).** Today 26.6 s/token. Engine, both drives, sparse: ~8 s.
-64 GB with a resident requantized trunk and the expert-side levers: **~0.7–0.8 tok/s verified
-(1.3 s/token); ~1.1–1.3 with a third drive**. Ghost text from the first second, rendered as a short
+64 GB with a resident requantized trunk and the expert-side levers, speculating at k=1 (5.30):
+**~1.0 tok/s verified on two drives; ~1.5 with a third; ~2.8 with k=12, routing prediction, a
+sequence-local cache and DDR5-6400 (all measurable/cheap); 3.7–4.0 if a Q3 trunk holds or with a
+24 GB GPU (~$1,300)**. Ghost text from the first second, rendered as a short
 window. Extra threads do not add speed (routing unions grow faster than they share). Reading a
 4K-token document by day is a near-dense pass: ~80 s (two drives), ~40 s (three) — reads are free
 only *inside a night sweep*. A single stream at 4+ tok/s needs a ~200 GB/s memory door (used
@@ -1258,6 +1260,86 @@ shards 2–19. Facts that change earlier text:
   `ffn_res_score`, `output_res_score` on every block (the `attn_res` variant risk in §12.2).
 - Tokenizer: `gpt2` model, pre `kimi-k2`, vocab 163,840 — the draft must match this exactly (check
   Moonlight's GGUF `tokenizer.ggml.pre` and vocab size before trusting the 0.56).
+
+### 5.30 Daytime deep dive, second pass: making 3 tok/s the floor (2026-09-07, CALC; ASSUMED marked)
+
+Asked whether 3 tok/s on one thread can be the floor and 4 reachable. Rebuilding the per-token
+budget from scratch found one modelling error in my own favour and four levers not yet in the plan.
+
+**The correction: speculate at k=1, not k=2.** The verifier processes k rows per pass (the k draft
+positions; the k-th also yields a bonus token) and the expert union grows with rows:
+1 row = 16 experts, 2 rows ≈ 31.7 (×1.98), 3 rows ≈ 47 (×2.95). Expected tokens per pass are
+Σ_{i=0..k} aⁱ = 1.56 (k=1), 1.87 (k=2), 2.05 (k=3) at a = 0.56. Tokens *per expert-byte* are
+therefore 1.56 at k=1, 0.94 at k=2, 0.70 at k=3 — k=1 gives **+56% tokens for exactly the expert
+bytes of no speculation**, and every earlier daytime row (5.21 S8, 5.26, 5.28) used k=2 at an
+optimistic ×1.8 union, i.e. no better than unspeculated. Corrected base on 64 GB, two drives, Q4
+trunk (33 GB, 6 in VRAM), hot cache 20% hits, rows ×0.75, rANS ×0.96, U 0.75: **~1.0 tok/s**, not 0.7.
+
+**The ladder (cumulative; per pass = trunk from RAM + expert bytes from drives):**
+
+| step | s/pass (trunk + experts) | tok/s | status |
+|---|---|---|---|
+| D0 as above, no speculation | 1.58 (0.48 + 1.10) | 0.63 | CALC |
+| D1 + k=1 speculation | 1.58 | **1.0** | CALC, measured acceptance |
+| D2 + third drive (20 GB/s) | 1.03 (0.48 + 0.55) | 1.5 | $130 |
+| D3 + k = 12 experts | 0.89 (0.48 + 0.41) | 1.75 | tonight's sweep decides |
+| D4 + next-block routing prediction, U 0.75 → 0.92 | 0.82 (0.48 + 0.34) | 1.9 | NEW, ASSUMED accuracy |
+| D5 + sequence-local expert cache, misses 0.8 → 0.5 | 0.69 (0.48 + 0.21) | 2.3 | NEW, ASSUMED; routing trace measures |
+| D6 + DDR5-6400 2×32 GB instead of 4×16 4800 (RAM door 60 → 85 GB/s) | 0.56 (0.35 + 0.21) | **2.8** | RAM purchase choice |
+| D7a + Q3 trunk 22 GB | 0.43 (0.22 + 0.21) | **3.7** | ~40% odds |
+| D7b + used 24 GB GPU (20 GB of trunk in VRAM), ~$1,300 | 0.39 (0.18 + 0.21) | **4.0** | money |
+| D8 both | 0.24 (0.03 + 0.21) | 6.5 | |
+
+**The four new levers.**
+- *Next-block routing prediction (D4).* At B=1 each block is serial: trunk compute (~5 ms from RAM)
+  then expert reads (~15 ms) — the drives idle a quarter of the time. A small predictor from block
+  L's input to block L+1's top experts (Pre-gated MoE 2023; PowerInfer-2 does it on phones) lets
+  the next block's reads issue during this block's compute; a miss costs one extra read. Target
+  U 0.92. Trainable from routing traces.
+- *Sequence-local expert cache (D5).* Within one conversation, consecutive tokens re-use experts far
+  more than independent routing predicts (MoE-Infinity, PowerInfer-2 report 40–70% LRU hit rates
+  on Mixtral-class models with small caches). The hot cache in 5.15 was modelled as *global*
+  frequency (20–30%); an LRU keyed on the live conversation could halve misses. Same overnight
+  routing trace measures both. Cache hits still cross RAM → GPU at 22 GB/s or are computed on the
+  CPU from RAM at 60 GB/s — a hit costs ~⅓ of a miss, not zero (folded into the 0.5).
+- *The RAM door (D6).* The RAM purchase should be **2 × 32 GB DDR5-6000/6400**, not 2 × 16 4800:
+  same 64 GB, ~85 GB/s instead of 60 (four DIMMs would also downclock the existing 4800 kit),
+  two slots left free for 128 GB later, ~$400 vs $350. Trunk time falls 0.48 → 0.35 s. Helps the
+  night ring traffic too.
+- *A bigger GPU (D7b).* The trunk read is the last floor; VRAM at 900 GB/s removes it. A used 24 GB
+  card (3090, ~$1,300 in §8) holds 20 GB of the Q4 trunk (33 GB does not fit whole; Q3's 22 GB
+  nearly does) → ~4 tok/s with everything else; it also lifts the night tiers (≈ 70 TFLOPS dense
+  fp16 vs 43 → the GPU cap on the fp8/low-rank tiers moves up ~1.6×, and ~16 GB of VRAM for states
+  ≈ +75 streams). Dual-use, and the single largest daytime step money can buy below the EPYC.
+
+**Threads/forks, revisited.** Once expert bytes are cut (D5–D6) the shared trunk dominates the pass
+again and multi-threading pays: at D6, 2 threads ≈ 4.1 tok/s aggregate (2.0 each), 4 threads ≈ 5.3
+(1.3 each) — and fork-parallel answers regain ~2× on a structured answer. 5.26's "threads never
+help" was true for the byte mix it modelled and is wrong once the expert term is small. The
+condition is explicit now: threads help when trunk time > per-thread expert time.
+
+**Honest reading.** On the existing GPU, everything measured-or-plausible (D1–D6: k=1, third
+drive, k=12, routing prediction, sequence cache, 6400 RAM) lands at **~2.8 tok/s** — 3 is within
+model error but not a floor. Making 3 the floor needs one of: the Q3 trunk holding (~40%), or a 24 GB
+GPU (~$1,300) → 3.7–4.0; both → 6.5. The decisive measurements, both free and both this week:
+tonight's k sweep (D3) and the routing trace (D4, D5, and the sparse-sweep/night question).
+
+### 5.31 Expert pruning: a smaller K3 for the night sweep (2026-09-07, KNOWN elsewhere; ASSUMED for K3)
+
+Found while re-deriving the daytime budget, but it is a *night* lever. Recent work prunes whole
+experts from large MoEs after training with small quality loss (REAP, Cerebras 2025: 25–50% of
+experts removed from Qwen3-Coder-480B and GLM-4.5 class models on coding tasks using
+router-weight × expert-output-norm saliency; earlier frequency-based pruning on Mixtral was
+weaker). Each token still routes to 16 of the *remaining* experts, so per-token bytes by day do not
+change — but the **sweep** reads every remaining expert: pruning 25% of experts is −23% of sweep
+bytes, 50% is −46%, i.e. **×1.3 / ×1.9 on every night row**, with no engine change beyond a
+smaller tape. It also concentrates routing (fewer experts → higher cache hit rates by day) and
+shrinks the on-disk model (861 → ~650 / ~450 GB — the whole thing fits on the 990 PRO's free space).
+Requirements: routing statistics over calibration text (the same overnight routing trace), expert
+saliency (needs expert output norms — one instrumented pass), a GGUF rewrite dropping expert
+slices and remapping `ffn_gate_inp`/`exp_probs_b` rows (file surgery, no training), and the quant
+oracle on the result. Odds that 25% pruning passes the KL gate on the operator's jobs: ~55%;
+50%: ~25%. Stacks multiplicatively with everything in §8d.
 
 ## 6. Earlier findings that still stand (SIM)
 

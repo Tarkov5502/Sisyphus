@@ -10,7 +10,8 @@
 
 set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FILES=(rig_fio.json first_token_linux.json first_token_linux.log rig_fio_sustained.json drive_temps.csv rig_streamer.json rig_streamer_sweep.json rig_streamer_sparse32.json rig_streamer_sparse1.json acceptance_results_512.json quant_oracle.json)
+FILES=(rig_fio.json first_token_linux.json first_token_linux.log rig_fio_sustained.json drive_temps.csv rig_streamer.json rig_streamer_sweep.json rig_streamer_sparse32.json rig_streamer_sparse1.json acceptance_results_512.json quant_oracle.json k_sweep_linux.json route_stats_k16.txt route_stats_k16.json)
+for k in 16 14 12 10 8; do FILES+=("k_sweep_k$k.log" "route_k$k.bin"); done
 
 echo "== results in $REPO =="
 for f in "${FILES[@]}"; do
@@ -18,6 +19,9 @@ for f in "${FILES[@]}"; do
     echo "--- $f"
     case "$f" in
         *.json) command -v jq >/dev/null && jq -c 'del(.phases)' "$REPO/$f" 2>/dev/null || head -c 2000 "$REPO/$f"; echo ;;
+        k_sweep_k*.log) grep -E "Final estimate|Mean +KLD|Same top p|sisyphus" "$REPO/$f" | tail -4 ;;
+        *.bin)  ls -la "$REPO/$f" | awk '{print $5" bytes"}' ;;
+        *.txt)  head -30 "$REPO/$f" ;;
         *.log)  grep -E "eval time|prompt eval|load time|^[^l].{0,200}$" "$REPO/$f" | grep -v "^llama_model\|^ggml_\|^print_info\|^load" | tail -15 ;;
     esac
 done

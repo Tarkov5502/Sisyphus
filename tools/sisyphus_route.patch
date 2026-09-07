@@ -1,0 +1,76 @@
+# sisyphus_route.patch - routing-trace hook for llama-perplexity; made against ggml-org/llama.cpp f114f91 (2026-09-07). Apply: git apply tools/sisyphus_route.patch
+diff --git a/tools/perplexity/perplexity.cpp b/tools/perplexity/perplexity.cpp
+index ba41287..4b3a6a9 100644
+--- a/tools/perplexity/perplexity.cpp
++++ b/tools/perplexity/perplexity.cpp
+@@ -2008,6 +2008,58 @@ static void kl_divergence(llama_context * ctx, const common_params & params) {
+ // satisfies -Wmissing-declarations
+ int llama_perplexity(int argc, char ** argv);
+ 
++
++// ---- Sisyphus routing trace (tools/sisyphus_route.patch) -------------------------------------------
++// If SISYPHUS_ROUTE_LOG=<file> is set, append every MoE block's selected experts (and their routing
++// weights) for every token evaluated. Record layout (little-endian): u32 magic 0x53525431 ("SRT1"),
++// i32 layer, i32 n_tokens, i32 n_used, then n_used*n_tokens i32 expert ids, then n_used*n_tokens f32
++// weights (zeros if the weights tensor was not observed).
++#include <cstdio>
++#include <cstring>
++#include <cstdlib>
++#include <cstdint>
++#include <vector>
++struct sisyphus_route_state { FILE * f = nullptr; std::vector<int32_t> ids; std::vector<float> w; int layer = -1; int n_tok = 0; int n_used = 0; bool have_ids = false; };
++static bool sisyphus_route_cb(struct ggml_tensor * t, bool ask, void * ud) {
++    auto * st = (sisyphus_route_state *) ud;
++    const bool is_topk = strncmp(t->name, "ffn_moe_topk-", 13) == 0;
++    const bool is_w    = strncmp(t->name, "ffn_moe_weights-", 16) == 0;
++    if (ask) return is_topk || is_w;
++    if (!is_topk && !is_w) return true;
++    const char * dash = strrchr(t->name, '-');
++    const int layer = dash ? atoi(dash + 1) : -1;
++    if (is_topk) {
++        if (t->type != GGML_TYPE_I32 || t->ne[2] != 1) return true;
++        st->layer = layer; st->n_used = (int) t->ne[0]; st->n_tok = (int) t->ne[1];
++        st->ids.resize((size_t) st->n_used * st->n_tok);
++        // top-k is a view into the argsort result: rows are strided by nb[1], so copy row by row
++        for (int r = 0; r < st->n_tok; ++r) {
++            ggml_backend_tensor_get(t, st->ids.data() + (size_t) r * st->n_used, (size_t) r * t->nb[1], (size_t) st->n_used * sizeof(int32_t));
++        }
++        st->have_ids = true;
++        return true;
++    }
++    if (!st->have_ids || layer != st->layer) return true;   // weights: [1, n_used, n_tokens] f32 -> flush the record
++    st->w.assign((size_t) st->n_used * st->n_tok, 0.0f);
++    if (t->type == GGML_TYPE_F32 && ggml_nelements(t) == (int64_t) st->w.size()) {
++        if (ggml_is_contiguous(t)) {
++            ggml_backend_tensor_get(t, st->w.data(), 0, ggml_nbytes(t));
++        } else if (t->ne[0] == 1) {   // [1, n_used, n_tokens] strided
++            for (int r = 0; r < st->n_tok; ++r) for (int j = 0; j < st->n_used; ++j) {
++                ggml_backend_tensor_get(t, st->w.data() + (size_t) r * st->n_used + j, (size_t) r * t->nb[2] + (size_t) j * t->nb[1], sizeof(float));
++            }
++        }
++    }
++    const uint32_t magic = 0x53525431u;
++    fwrite(&magic, 4, 1, st->f); fwrite(&st->layer, 4, 1, st->f); fwrite(&st->n_tok, 4, 1, st->f); fwrite(&st->n_used, 4, 1, st->f);
++    fwrite(st->ids.data(), 4, st->ids.size(), st->f); fwrite(st->w.data(), 4, st->w.size(), st->f);
++    fflush(st->f);
++    st->have_ids = false;
++    return true;
++}
++static sisyphus_route_state g_sisyphus_route;
++// ---------------------------------------------------------------------------------------------------
++
+ int llama_perplexity(int argc, char ** argv) {
+     std::setlocale(LC_NUMERIC, "C");
+ 
+@@ -2046,6 +2098,11 @@ int llama_perplexity(int argc, char ** argv) {
+     llama_backend_init();
+     llama_numa_init(params.numa);
+ 
++    if (const char * rl = getenv("SISYPHUS_ROUTE_LOG")) {
++        g_sisyphus_route.f = fopen(rl, "ab");
++        if (g_sisyphus_route.f) { params.cb_eval = sisyphus_route_cb; params.cb_eval_user_data = &g_sisyphus_route; LOG_INF("sisyphus: routing trace -> %s\n", rl); }
++        else { LOG_ERR("sisyphus: cannot open %s\n", rl); }
++    }
+     // load the model and apply lora adapter, if any
+     auto llama_init = common_init_from_params(params);
+ 

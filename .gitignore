@@ -31,3 +31,6 @@ k_sweep.json
 k_sweep_k*.log
 k_sweep_text.txt
 k_sweep_logits.bin
+k_sweep_linux.json
+route_k*.bin
+route_stats_k16.*
