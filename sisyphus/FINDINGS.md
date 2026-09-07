@@ -77,7 +77,7 @@ real rig. First real Sisyphus token: after step 4.
 | architecture | `kimi-k3` | 93 blocks: 1 leading dense, 92 MoE |
 | attention | **24 MLA blocks + 69 KDA blocks** | `head_count_kv = [0,0,0,1,...]`; hybrid linear attention |
 | experts / active / shared | 896 / 16 / 2 | |
-| expert latent dim | 3584 | `expert_latent_length`; V2/V3 misread this as an MLA latent |
+| expert latent dim · expert hidden | 3584 · **3072** | `expert_latent_length`; gate/up [3584→3072], down [3072→3584]; routed experts IQ2_XS, trunk **Q8_0**; trained context 1,048,576; no MTP head (§5.29) |
 | MLA KV per token | 576 fp16 values per MLA block → **0.028 MB/token** | `kv_lora_rank 512 + rope 64` |
 | **KDA state per stream** | 69 × 96 heads × 128 × 128 × 2 B → **217 MB (bf16)** | constant in context; the binding memory bound |
 | expert size | **9.68 MB** (IQ2_XS gate/up, IQ2_XS or IQ3_XXS down) | from tensor offsets |
@@ -114,8 +114,10 @@ aggregate sustained for eight hours**, matching the 180 s Linux number (9.51) �
 night. 279 TB read (178 + 102), zero errors. Per-interval minima show transient dips (990 PRO to
 ~2.8 GB/s combined, SN570 to ~0.2 GB/s for single intervals) — read-reclaim or housekeeping
 moments, not throttling; they matter for the static drive split (sweep = max_i(bytes_i/bw_i),
-§5.28) and argue for runtime rebalancing. Temperatures: **990 PRO 33 → 71 °C and steady at 71 for
-hours; SN570 28 → 61 °C**. The 990 PRO's throttle threshold is ~80–85 °C and it sits in M2_1 under
+§5.28) and argue for runtime rebalancing. Temperatures: **990 PRO 33 → 70 °C within 40 minutes, then flat at 70–71 for seven hours; SN570
+28 → 60–61** — thermal equilibrium with the GPU idle. Per-job bandwidth jitter σ ≈ 14% of mean;
+8 MiB read latency mean 87 ms / p99 154 ms on the 990 PRO at QD32 (vs ~43 ms if perfectly smooth),
+151 / 285 ms on the SN570 — the queue depth absorbs it, which is why the average held. The 990 PRO's throttle threshold is ~80–85 °C and it sits in M2_1 under
 the GPU; with the GPU at load all night the margin shrinks — a heatsink/airflow check is a
 prerequisite for the night engine, not an option. Planning number for the Linux engine from here:
 **9.7 GB/s as-is → 861 GB dense sweep 89 s, 104 s at 85% overlap** (RESULTS' 96 s uses the Windows
@@ -1228,6 +1230,34 @@ superseded (winsat era); the corrections-log entry that still quoted "5 across f
 $700/48 GB; 128 GB ≈ $1,400 extra); prefill capacity 7M at spec / 3M realistic; 32 GB daytime
 aggregate 0.2 single → 0.5; 700–800 TB/night of reads is the three-drive figure (387 TB as-is).
 Confidence figures are judgment, not calibration; they are labelled as such.
+
+### 5.29 Shard-1 metadata and the full tensor table, read 2026-09-07 (SHARDS)
+
+Build step 0 done. Shard 1 is metadata-only (0 tensors, 64 KV pairs); the 2,573 tensors sit in
+shards 2–19. Facts that change earlier text:
+- **No MTP / next-n head.** Non-block tensors are exactly `token_embd`, `output`, `output_norm`,
+  `output_res_score`. The draft must be external (Moonlight, Kimi-vocab) or an EAGLE-style head we
+  train (§5.24). Option (1) of §5.21 is closed.
+- **Trained context = 1,048,576 tokens.** The §5.25/§7b.1 cap is memory and attention FLOPs, not
+  the model's training length.
+- **The trunk is Q8_0, not fp16.** Every attention/KDA projection, shared expert, routed-latent
+  projection, embedding and output tensor is type 8 (Q8_0). So "trunk requantization" is
+  Q8 → Q4_K/Q5_K on attention tensors — the trade every mainstream Q4_K_M quant already makes —
+  not a leap to 2–3 bits. Expected sizes: Q5_K ~40 GB, **Q4_K ~33 GB (odds of acceptable KL
+  ~75%)**, Q3_K ~26 GB (~45%), the 22 GB figure needs IQ3/IQ2-class (~35%). Daytime residency at
+  33 GB in 64 GB works with ~12 GB left over (small hot cache). This softens 5.28's worst-prior
+  note: the ×2 daytime lever is mostly a standard quant step.
+- **Expert shape:** gate/up are [3584 → 3072], down [3072 → 3584]; the routed FFN hidden width is
+  **3072 neurons** per expert (rows for masking), operating in the 3584 latent
+  (`ffn_routed_up/down` map 7168 ↔ 3584). All routed experts are **IQ2_XS** (type 17) in the blocks
+  inspected; 3 × 3584 × 3072 ≈ 33M weights → 9.7 MB at ~2.35 bpw ✓.
+- Router: `ffn_gate_inp` [7168 → 896] f32 + `exp_probs_b` bias, `expert_gating_func = 2` (sigmoid),
+  `expert_weights_norm = true`, `expert_group_used_count = 1`. KDA: `ssm_f_a` [7168 → 128] and
+  `ssm_f_b` [128 → 12288] (a rank-128 gate projection), `ssm_a` [96], `ssm_beta` [7168 → 96],
+  conv kernel 4 on q/k/v, `gate_lower_bound = −5`. Residual scoring tensors `attn_res_score`,
+  `ffn_res_score`, `output_res_score` on every block (the `attn_res` variant risk in §12.2).
+- Tokenizer: `gpt2` model, pre `kimi-k2`, vocab 163,840 — the draft must match this exactly (check
+  Moonlight's GGUF `tokenizer.ggml.pre` and vocab size before trusting the 0.56).
 
 ## 6. Earlier findings that still stand (SIM)
 

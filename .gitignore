@@ -27,3 +27,7 @@ rig_streamer.json
 rig_streamer_sweep.json
 rig_streamer_sparse32.json
 rig_streamer_sparse1.json
+k_sweep.json
+k_sweep_k*.log
+k_sweep_text.txt
+k_sweep_logits.bin
